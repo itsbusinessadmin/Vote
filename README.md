@@ -15,6 +15,7 @@ the database, admin login and image storage run on the **Supabase free tier**. T
 ## Features
 
 **Admin**
+- **Password-only sign-in**: devices you've signed in on stay signed in. There is a devices list, "sign out other devices" and password change.
 - **Event & branding**: title, subtitle, description, logo, banner, theme color, open/close times, multiple events, share link + QR code.
 - **Contestants**: add, edit, reorder, hide and delete, with photo upload. Images are compressed in the browser to save free storage.
 - **Criteria**: name, percentage (weight) and description. Shows a warning when the total isn't 100%.
@@ -83,15 +84,21 @@ The anon key is designed to be public; the database security rules protect your 
 - **Netlify / Vercel / Cloudflare Pages**: import the repo. There is no build command, and the output directory is the root.
 - To test locally, run `npx serve .` and open <http://localhost:3000>.
 
-### 4. Become the admin
-1. Open `admin.html` → **Create admin account**, then sign in. **The first account to sign in becomes the admin.**
+### 4. Set the admin password
+1. Open `admin.html`. The first time, it asks you to **choose the admin password** (e.g. `CESADMIN`). Type it twice and you're in.
 2. Back in Supabase: **Authentication → Sign In / Providers → turn off "Allow new users to sign up"** so nobody else can create accounts.
-   (Other accounts can never become admin anyway, but this keeps things tidy.)
 
-To add another admin later, have them sign up while sign-ups are on. Then run this in the SQL Editor:
-```sql
-insert into public.admins (user_id) select id from auth.users where email = 'friend@example.com';
-```
+After that, the admin page asks **only for the password**, with no email or username.
+Each phone, PC or local dev browser that has signed in once **stays signed in automatically** and opens straight to the dashboard.
+It only asks again if that browser's data is cleared or you sign the device out.
+
+Click **🔐 Devices & password** in the sidebar to:
+- see every device that is signed in as admin (type, OS, model, IP, last used);
+- **sign out all other devices**, for example if you used a borrowed phone;
+- change the password.
+
+Behind the scenes the password belongs to an internal account named by `ADMIN_EMAIL` in `config.js`.
+It doesn't need to be a real inbox, which is why "Confirm email" must be off in step 1.
 
 ### 5. Run your event
 1. **Event & branding**: set the title and logo, then set the status to **Open**.

@@ -2,9 +2,13 @@ import {
   sb, configured, $, h, fill, toast, modal, confirmBox, money, setTheme, notConfigured,
   uploadImage, pickFile, downloadText, slugify, voteUrl,
 } from './lib.js';
+import * as config from './config.js';
+import { getDevice } from './device.js';
 import { standingsList, rankResults, displayName, initials, valueLabel } from './standings.js';
 
 const app = $('#app');
+// Older config.js files have no ADMIN_EMAIL; fall back to the default.
+const ADMIN_EMAIL = config.ADMIN_EMAIL || 'admin@vote-admin.app';
 const TABS = [
   ['event', '🎨 Event & branding'],
   ['contestants', '🎤 Contestants'],
@@ -36,29 +40,73 @@ async function main() {
       h('button.btn', { onclick: async () => { await sb.auth.signOut(); location.reload(); } }, 'Sign out')));
     return;
   }
+  getDevice().then((d) => sb.rpc('touch_admin_device', { p_device: d }));
   await loadEvents();
   renderShell();
 }
 
-function renderLogin() {
-  const email = h('input', { type: 'email', placeholder: 'admin@example.com', autocomplete: 'email' });
-  const pass = h('input', { type: 'password', placeholder: 'Password', autocomplete: 'current-password' });
-  const go = async (signup) => {
-    if (!email.value || pass.value.length < 6) return toast('Enter an email and a password of at least 6 characters.', 'error');
-    const fn = signup ? sb.auth.signUp : sb.auth.signInWithPassword;
-    const { data, error } = await fn.call(sb.auth, { email: email.value.trim(), password: pass.value });
-    if (error) return toast(error.message, 'error');
-    if (signup && !data.session) return toast('Account created. Check your email to confirm it, then sign in.', 'success');
-    location.reload();
+async function renderLogin() {
+  const { data: hasAdmin } = await sb.rpc('admin_exists');
+  const setup = !hasAdmin;
+  const pass = h('input', { type: 'password', placeholder: setup ? 'Choose an admin password' : 'Admin password', autocomplete: setup ? 'new-password' : 'current-password' });
+  const confirm = setup ? h('input', { type: 'password', placeholder: 'Type it again', autocomplete: 'new-password' }) : null;
+  const submit = h('button.btn.primary.block', { type: 'submit' }, setup ? 'Set password & sign in' : 'Sign in');
+
+  const go = async () => {
+    const pw = pass.value;
+    if (pw.length < 6) return toast('The password must be at least 6 characters.', 'error');
+    if (setup && pw !== confirm.value) return toast('The passwords do not match.', 'error');
+    submit.disabled = true;
+    try {
+      let { data, error } = await sb.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pw });
+      if (error && setup) ({ data, error } = await sb.auth.signUp({ email: ADMIN_EMAIL, password: pw }));
+      if (error) return toast(/invalid/i.test(error.message) ? 'Wrong password.' : error.message, 'error');
+      if (!data.session) return toast('Turn off "Confirm email" in Supabase → Authentication, then try again.', 'error');
+      location.reload();
+    } finally { submit.disabled = false; }
   };
-  fill(app, h('div.center-card', { style: { textAlign: 'left' } },
-    h('h2', 'Admin sign in'),
-    h('p.muted.small', 'The first account that signs in becomes the admin. Turn off sign-ups in Supabase afterwards (see the README).'),
-    h('form.stack', { onsubmit: (e) => { e.preventDefault(); go(false); } },
-      h('label.field', h('span', 'Email'), email),
-      h('label.field', h('span', 'Password'), pass),
-      h('button.btn.primary.block', { type: 'submit' }, 'Sign in'),
-      h('button.btn.ghost.block', { type: 'button', onclick: () => go(true) }, 'Create admin account'))));
+
+  fill(app, h('div.center-card', { style: { textAlign: 'left', maxWidth: '400px' } },
+    h('div', { style: { fontSize: '2.2rem' } }, '🔐'),
+    h('h2', setup ? 'Set up admin' : 'Admin'),
+    h('p.muted.small', setup
+      ? 'Choose the admin password. You will only need to type it once per device.'
+      : 'Enter the admin password. This device will stay signed in.'),
+    h('form.stack', { onsubmit: (e) => { e.preventDefault(); go(); } },
+      pass, confirm, submit)));
+  pass.focus();
+}
+
+// Devices that are signed in as admin, plus password change.
+async function showDevices() {
+  const me = (await getDevice()).device_token;
+  const { data: list } = await sb.from('admin_devices').select('*').order('last_seen', { ascending: false });
+  const pw = h('input', { type: 'password', placeholder: 'New password', autocomplete: 'new-password' });
+  modal('Admin devices', h('div.stack',
+    h('p.small.muted', 'Devices below stay signed in automatically. Signing out other devices makes them ask for the password again.'),
+    h('div.table-wrap', h('table',
+      h('thead', h('tr', ['Device', 'IP', 'Last used'].map((t) => h('th', t)))),
+      h('tbody', (list || []).map((d) => h('tr',
+        h('td.small', h('b', `${d.device_info?.type || 'Device'} · ${d.device_info?.os || ''}`),
+          d.device_token === me ? h('span.badge.open', { style: { marginLeft: '.4rem' } }, 'this device') : null,
+          h('div.muted', d.device_info?.model || d.device_info?.browser || '')),
+        h('td.small.mono', d.ip || '—'),
+        h('td.small', new Date(d.last_seen).toLocaleString())))))),
+    h('button.btn.sm', { onclick: async () => {
+      if (!(await confirmBox('Sign out other devices?', 'Every other phone or PC will need the password again.', 'Sign out others', true))) return;
+      const { error } = await sb.auth.signOut({ scope: 'others' });
+      if (error) return toast(error.message, 'error');
+      await sb.from('admin_devices').delete().neq('device_token', me);
+      toast('Other devices signed out', 'success');
+    } }, 'Sign out all other devices'),
+    h('h4', { style: { marginTop: '1rem' } }, 'Change password'),
+    h('div.row', h('div.grow', pw), h('button.btn.sm.primary', { onclick: async () => {
+      if (pw.value.length < 6) return toast('At least 6 characters.', 'error');
+      const { error } = await sb.auth.updateUser({ password: pw.value });
+      if (error) return toast(error.message, 'error');
+      pw.value = '';
+      toast('Password changed', 'success');
+    } }, 'Save'))));
 }
 
 // ---------------------------------------------------------------------
@@ -149,7 +197,11 @@ function renderSide() {
     }, h('span', label), id === 'payments' && pendingCount ? h('span.count', pendingCount) : null))) : null,
     h('div.grow'),
     ev ? h('a.btn.sm', { href: voteUrl(ev.slug), target: '_blank', rel: 'noopener' }, 'Open voting page ↗') : null,
-    h('button.btn.sm.ghost', { onclick: async () => { await sb.auth.signOut(); location.reload(); } }, 'Sign out'));
+    h('button.btn.sm.ghost', { onclick: showDevices }, '🔐 Devices & password'),
+    h('button.btn.sm.ghost', { onclick: async () => {
+      await sb.auth.signOut({ scope: 'local' });
+      location.reload();
+    } }, 'Sign out this device'));
 }
 
 function header(title, ...right) {

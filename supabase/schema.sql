@@ -557,3 +557,41 @@ create policy "proofs admin read" on storage.objects for select to authenticated
 drop policy if exists "proofs admin delete" on storage.objects;
 create policy "proofs admin delete" on storage.objects for delete to authenticated
   using (bucket_id = 'proofs' and public.is_admin());
+
+-- ---------------------------------------------------------------------
+-- Admin login helpers (password-only sign-in + remembered devices)
+-- ---------------------------------------------------------------------
+create or replace function public.admin_exists()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.admins);
+$$;
+grant execute on function public.admin_exists() to anon, authenticated;
+
+create table if not exists public.admin_devices (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users (id) on delete cascade,
+  device_token text not null,
+  fingerprint  text,
+  device_info  jsonb,
+  ip           text,
+  first_seen   timestamptz not null default now(),
+  last_seen    timestamptz not null default now(),
+  unique (user_id, device_token)
+);
+alter table public.admin_devices enable row level security;
+drop policy if exists admin_devices_admin on public.admin_devices;
+create policy admin_devices_admin on public.admin_devices for all using (public.is_admin()) with check (public.is_admin());
+
+-- Records the device the admin is signed in on.
+create or replace function public.touch_admin_device(p_device jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then return; end if;
+  insert into public.admin_devices (user_id, device_token, fingerprint, device_info, ip)
+  values (auth.uid(), left(p_device ->> 'device_token', 128), left(p_device ->> 'fingerprint', 128),
+          p_device -> 'device_info', public._client_ip())
+  on conflict (user_id, device_token) do update
+    set last_seen = now(), ip = excluded.ip, fingerprint = excluded.fingerprint, device_info = excluded.device_info;
+end;
+$$;
+grant execute on function public.touch_admin_device(jsonb) to authenticated;
