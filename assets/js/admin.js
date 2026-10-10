@@ -1,5 +1,5 @@
 import {
-  sb, configured, $, h, fill, toast, modal, confirmBox, money, setTheme, notConfigured,
+  sb, configured, $, h, fill, icon, fieldError, toast, modal, confirmBox, money, setTheme, notConfigured,
   uploadImage, pickFile, downloadText, slugify, voteUrl,
 } from './lib.js';
 import * as config from './config.js';
@@ -10,13 +10,13 @@ const app = $('#app');
 // Older config.js files have no ADMIN_EMAIL; fall back to the default.
 const ADMIN_EMAIL = config.ADMIN_EMAIL || 'admin@vote-admin.app';
 const TABS = [
-  ['event', '🎨 Event & branding'],
-  ['contestants', '🎤 Contestants'],
-  ['criteria', '📋 Criteria'],
-  ['rules', '🛡️ Voting rules'],
-  ['payments', '💳 Payments'],
-  ['votes', '🗳️ Votes & voters'],
-  ['screenshot', '📸 Screenshot'],
+  ['event', 'Event & branding', 'palette'],
+  ['contestants', 'Contestants', 'mic'],
+  ['criteria', 'Criteria', 'list-checks'],
+  ['rules', 'Voting rules', 'shield-check'],
+  ['payments', 'Payments', 'credit-card'],
+  ['votes', 'Votes & voters', 'vote'],
+  ['screenshot', 'Screenshot', 'camera'],
 ];
 
 let events = [];
@@ -48,32 +48,35 @@ async function main() {
 async function renderLogin() {
   const { data: hasAdmin } = await sb.rpc('admin_exists');
   const setup = !hasAdmin;
-  const pass = h('input', { type: 'password', placeholder: setup ? 'Choose an admin password' : 'Admin password', autocomplete: setup ? 'new-password' : 'current-password' });
-  const confirm = setup ? h('input', { type: 'password', placeholder: 'Type it again', autocomplete: 'new-password' }) : null;
+  const pass = h('input', { type: 'password', autocomplete: setup ? 'new-password' : 'current-password', required: true, minLength: 6 });
+  const confirm = setup ? h('input', { type: 'password', autocomplete: 'new-password', required: true }) : null;
   const submit = h('button.btn.primary.block', { type: 'submit' }, setup ? 'Set password & sign in' : 'Sign in');
 
   const go = async () => {
     const pw = pass.value;
-    if (pw.length < 6) return toast('The password must be at least 6 characters.', 'error');
-    if (setup && pw !== confirm.value) return toast('The passwords do not match.', 'error');
+    fieldError(pass, ''); if (confirm) fieldError(confirm, '');
+    if (pw.length < 6) return fieldError(pass, 'The password must be at least 6 characters.');
+    if (setup && pw !== confirm.value) return fieldError(confirm, 'The passwords do not match.');
     submit.disabled = true;
     try {
       let { data, error } = await sb.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pw });
       if (error && setup) ({ data, error } = await sb.auth.signUp({ email: ADMIN_EMAIL, password: pw }));
-      if (error) return toast(/invalid/i.test(error.message) ? 'Wrong password.' : error.message, 'error');
+      if (error) return /invalid/i.test(error.message) ? fieldError(pass, 'Wrong password. Try again.') : toast(error.message, 'error');
       if (!data.session) return toast('Turn off "Confirm email" in Supabase → Authentication, then try again.', 'error');
       location.reload();
     } finally { submit.disabled = false; }
   };
 
-  fill(app, h('div.center-card', { style: { textAlign: 'left', maxWidth: '400px' } },
-    h('div', { style: { fontSize: '2.2rem' } }, '🔐'),
-    h('h2', setup ? 'Set up admin' : 'Admin'),
+  fill(app, h('main.center-card', { style: { textAlign: 'left', maxWidth: '400px' } },
+    h('div.login-icon', icon('lock', 28)),
+    h('h1.page-title', setup ? 'Set up admin' : 'Admin sign in'),
     h('p.muted.small', setup
       ? 'Choose the admin password. You will only need to type it once per device.'
       : 'Enter the admin password. This device will stay signed in.'),
     h('form.stack', { onsubmit: (e) => { e.preventDefault(); go(); } },
-      pass, confirm, submit)));
+      h('label.field', h('span', setup ? 'Choose an admin password' : 'Admin password'), pass),
+      setup ? h('label.field', h('span', 'Type it again'), confirm) : null,
+      submit)));
   pass.focus();
 }
 
@@ -81,7 +84,7 @@ async function renderLogin() {
 async function showDevices() {
   const me = (await getDevice()).device_token;
   const { data: list } = await sb.from('admin_devices').select('*').order('last_seen', { ascending: false });
-  const pw = h('input', { type: 'password', placeholder: 'New password', autocomplete: 'new-password' });
+  const pw = h('input', { type: 'password', placeholder: 'New password', 'aria-label': 'New password', autocomplete: 'new-password' });
   modal('Admin devices', h('div.stack',
     h('p.small.muted', 'Devices below stay signed in automatically. Signing out other devices makes them ask for the password again.'),
     h('div.table-wrap', h('table',
@@ -99,7 +102,7 @@ async function showDevices() {
       await sb.from('admin_devices').delete().neq('device_token', me);
       toast('Other devices signed out', 'success');
     } }, 'Sign out all other devices'),
-    h('h4', { style: { marginTop: '1rem' } }, 'Change password'),
+    h('h3.card-title', { style: { marginTop: '1rem' } }, 'Change password'),
     h('div.row', h('div.grow', pw), h('button.btn.sm.primary', { onclick: async () => {
       if (pw.value.length < 6) return toast('At least 6 characters.', 'error');
       const { error } = await sb.auth.updateUser({ password: pw.value });
@@ -186,27 +189,33 @@ function renderSide() {
   const side = $('#side');
   if (!side) return;
   fill(side,
-    h('div.brand', ev?.logo_url ? h('img', { src: ev.logo_url, alt: '' }) : h('span', '🗳️'), h('span', 'Vote Admin')),
+    h('div.brand', ev?.logo_url ? h('img', { src: ev.logo_url, alt: '' }) : h('span.brand-icon', icon('vote', 22)), h('span', 'Vote Admin')),
     h('label.field', h('span', 'Event'),
       h('select', { onchange: (e) => e.target.value === '__new' ? createEvent() : selectEvent(e.target.value) },
         events.map((e) => h('option', { value: e.id, selected: e.id === ev?.id }, e.title)),
-        h('option', { value: '__new' }, '＋ New event…'))),
-    ev ? h('nav.nav', TABS.map(([id, label]) => h('button', {
+        h('option', { value: '__new' }, '+ New event…'))),
+    ev ? h('nav.nav', { 'aria-label': 'Admin sections' }, TABS.map(([id, label, ic]) => h('button', {
+      type: 'button',
       class: id === tab ? 'active' : '',
+      'aria-current': id === tab ? 'page' : null,
       onclick: () => { tab = id; localStorage.setItem('admin_tab', id); side.classList.remove('open'); renderSide(); renderTab(); },
-    }, h('span', label), id === 'payments' && pendingCount ? h('span.count', pendingCount) : null))) : null,
+    }, h('span.nav-label', icon(ic), label),
+      id === 'payments' && pendingCount ? h('span.count', { 'aria-label': `${pendingCount} pending` }, pendingCount) : null))) : null,
     h('div.grow'),
-    ev ? h('a.btn.sm', { href: voteUrl(ev.slug), target: '_blank', rel: 'noopener' }, 'Open voting page ↗') : null,
-    h('button.btn.sm.ghost', { onclick: showDevices }, '🔐 Devices & password'),
-    h('button.btn.sm.ghost', { onclick: async () => {
+    ev ? h('a.btn.sm', { href: voteUrl(ev.slug), target: '_blank', rel: 'noopener' }, 'Open voting page', icon('external-link', 16), h('span.sr-only', '(opens in a new tab)')) : null,
+    h('button.btn.sm.ghost', { type: 'button', onclick: showDevices }, icon('lock', 16), 'Devices & password'),
+    h('button.btn.sm.ghost', { type: 'button', onclick: async () => {
       await sb.auth.signOut({ scope: 'local' });
       location.reload();
-    } }, 'Sign out this device'));
+    } }, icon('log-out', 16), 'Sign out this device'));
 }
 
 function header(title, ...right) {
   return h('header',
-    h('div.row', h('button.btn.sm.menu-toggle', { onclick: () => $('#side').classList.toggle('open') }, '☰'), h('h2', title)),
+    h('div.row',
+      h('button.btn.sm.menu-toggle', { type: 'button', 'aria-label': 'Open menu', 'aria-controls': 'side',
+        onclick: (e) => e.currentTarget.setAttribute('aria-expanded', String($('#side').classList.toggle('open'))) }, icon('menu', 20)),
+      h('h1.page-title', title)),
     h('div.row', right));
 }
 
@@ -216,10 +225,10 @@ function renderTab() {
   if (!ev) {
     fill(main, h('div.center-card',
       h('h2', 'Welcome!'), h('p.muted', 'Create your first event to get started.'),
-      h('button.btn.primary', { onclick: createEvent }, '＋ Create event')));
+      h('button.btn.primary', { onclick: createEvent }, icon('plus'), 'Create event')));
     return;
   }
-  fill(main, h('div.spinner'));
+  fill(main, h('div.spinner', { role: 'status', 'aria-label': 'Loading' }));
   ({ event: tabEvent, contestants: tabContestants, criteria: tabCriteria, rules: tabRules,
     payments: tabPayments, votes: tabVotes, screenshot: tabScreenshot }[tab] || tabEvent)(main)
     .catch((e) => { console.error(e); fill(main, h('p', { style: { color: 'var(--bad)' } }, e.message)); });
@@ -297,21 +306,21 @@ async function tabEvent(main) {
       h('span.badge', { class: ev.status }, ev.status),
       h('button.btn.danger.sm', { onclick: deleteEvent }, 'Delete event')),
     h('div.card.section',
-      h('h3', 'Share with your audience'),
+      h('h2.card-title', 'Share with your audience'),
       h('div.share', qrBox, h('div.stack.grow',
         h('code', { style: { wordBreak: 'break-all' } }, url),
         h('div.row',
           h('button.btn.sm.primary', { onclick: () => navigator.clipboard.writeText(url).then(() => toast('Link copied', 'success')) }, 'Copy link'),
-          h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'Open ↗')),
+          h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'Open', icon('external-link', 16), h('span.sr-only', '(opens in a new tab)'))),
         h('small.muted', ev.status === 'draft' ? 'The event is a draft. Set the status to Open so the audience can see it.' : '')))),
     h('div.card.section.stack',
-      h('h3', 'Status'),
+      h('h2.card-title', 'Status'),
       h('div.grid-2',
         field('Voting status', select(d, 'status', [['draft', 'Draft (hidden)'], ['open', 'Open (accepting votes)'], ['closed', 'Closed (view only)']])),
         field('Opens at (optional)', input(d, 'starts_at', 'datetime-local')),
         field('Closes at (optional)', input(d, 'ends_at', 'datetime-local'), 'Voting stops automatically at this time.'))),
     h('div.card.section.stack',
-      h('h3', 'Details'),
+      h('h2.card-title', 'Details'),
       field('Title', input(d, 'title')),
       field('Subtitle', input(d, 'subtitle', 'text', { placeholder: 'e.g. Grand Finals · Oct 20, 2026' })),
       field('Description / instructions', input(d, 'description', 'textarea', { placeholder: 'Shown to voters above the contestants.' })),
@@ -319,7 +328,7 @@ async function tabEvent(main) {
         field('Link name (URL slug)', input(d, 'slug'), 'Used in the voting link. Letters, numbers and dashes.'),
         field('Theme color', input(d, 'theme_color', 'color')))),
     h('div.card.section.stack',
-      h('h3', 'Images'),
+      h('h2.card-title', 'Images'),
       h('div.grid-2',
         imageUpload('Logo', 'logo_url', { hint: 'Square PNG works best. It also appears in screenshots.', maxSide: 600 }),
         imageUpload('Banner / background', 'banner_url', { wide: true, hint: 'Wide image for the top of the voting page.', maxSide: 1920 }))),
@@ -360,7 +369,7 @@ async function tabContestants(main) {
   };
 
   fill(main,
-    header('Contestants', h('button.btn.primary', { onclick: () => editContestant(null, list.length) }, '＋ Add contestant')),
+    header('Contestants', h('button.btn.primary', { onclick: () => editContestant(null, list.length) }, icon('plus'), 'Add contestant')),
     list.length ? h('div', list.map((c, i) => h('div.list-item',
       h('div.thumb', { style: c.photo_url ? { backgroundImage: `url("${c.photo_url}")` } : {} }, c.photo_url ? '' : initials(c.name)),
       h('div',
@@ -368,14 +377,14 @@ async function tabContestants(main) {
         !c.active ? h('span.badge', { style: { marginLeft: '.5rem' } }, 'hidden') : null,
         c.description ? h('div.muted.small', c.description) : null),
       h('div.actions',
-        h('button.btn.sm', { onclick: () => move(i, -1), disabled: i === 0, title: 'Move up' }, '↑'),
-        h('button.btn.sm', { onclick: () => move(i, 1), disabled: i === list.length - 1, title: 'Move down' }, '↓'),
+        h('button.btn.sm.icon-only', { type: 'button', onclick: () => move(i, -1), disabled: i === 0, 'aria-label': `Move ${c.name} up` }, icon('arrow-up', 16)),
+        h('button.btn.sm.icon-only', { type: 'button', onclick: () => move(i, 1), disabled: i === list.length - 1, 'aria-label': `Move ${c.name} down` }, icon('arrow-down', 16)),
         h('button.btn.sm', { onclick: () => editContestant(c) }, 'Edit'),
-        h('button.btn.sm.ghost', { onclick: async () => {
+        h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
           if (!(await confirmBox('Delete contestant?', `Delete ${c.name} and all of their votes?`, 'Delete', true))) return;
           const { error: err } = await sb.from('contestants').delete().eq('id', c.id);
           if (err) toast(err.message, 'error'); else renderTab();
-        } }, '🗑'))))) : h('div.card', h('p.muted', 'No contestants yet. Add your first one.')));
+        }, 'aria-label': `Delete ${c.name}` }, icon('trash-2', 16)))))) : h('div.card', h('p.muted', 'No contestants yet. Add your first one.')));
 }
 
 async function editContestant(c, order = 0) {
@@ -425,7 +434,7 @@ async function tabCriteria(main) {
   const total = list.reduce((s, c) => s + Number(c.weight), 0);
 
   fill(main,
-    header('Criteria', h('button.btn.primary', { onclick: () => editCriterion(null, list.length) }, '＋ Add criterion')),
+    header('Criteria', h('button.btn.primary', { onclick: () => editCriterion(null, list.length) }, icon('plus'), 'Add criterion')),
     h('div.card.section',
       h('div.row.between',
         h('div', h('b', 'Total weight: '), h('span.weight-total', { class: Math.abs(total - 100) < 0.01 ? 'good' : 'bad' }, `${total}%`)),
@@ -438,17 +447,17 @@ async function tabCriteria(main) {
       h('div.thumb', { style: { fontSize: '1rem', color: 'var(--brand)' } }, `${Number(c.weight)}%`),
       h('div', h('b', c.name), c.description ? h('div.muted.small', c.description) : null),
       h('div.actions',
-        h('button.btn.sm', { disabled: i === 0, onclick: async () => {
+        h('button.btn.sm.icon-only', { type: 'button', disabled: i === 0, onclick: async () => {
           [list[i - 1], list[i]] = [list[i], list[i - 1]];
           await Promise.all(list.map((x, k) => sb.from('criteria').update({ sort_order: k }).eq('id', x.id)));
           renderTab();
-        } }, '↑'),
+        }, 'aria-label': `Move ${c.name} up` }, icon('arrow-up', 16)),
         h('button.btn.sm', { onclick: () => editCriterion(c) }, 'Edit'),
-        h('button.btn.sm.ghost', { onclick: async () => {
+        h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
           if (!(await confirmBox('Delete criterion?', `Delete "${c.name}"? Ratings already given for it will no longer count.`, 'Delete', true))) return;
           const { error: err } = await sb.from('criteria').delete().eq('id', c.id);
           if (err) toast(err.message, 'error'); else renderTab();
-        } }, '🗑'))))) : h('div.card.section', h('p.muted', 'No criteria yet. Example: Vocals 40%, Stage presence 30%, Audience impact 30%.')));
+        }, 'aria-label': `Delete ${c.name}` }, icon('trash-2', 16)))))) : h('div.card.section', h('p.muted', 'No criteria yet. Example: Vocals 40%, Stage presence 30%, Audience impact 30%.')));
 }
 
 async function editCriterion(c, order = 0) {
@@ -495,7 +504,7 @@ async function tabRules(main, draft) {
   fill(main,
     header('Voting rules'),
     h('div.card.section.stack',
-      h('h3', 'How people vote'),
+      h('h2.card-title', 'How people vote'),
       h('div.grid-2',
         field('Voting style', select(d, 'voting_mode', [
           ['simple', 'Pick a contestant (criteria shown as a guide)'],
@@ -505,7 +514,7 @@ async function tabRules(main, draft) {
       field('Pricing', pricing),
       paidBox),
     h('div.card.section.stack',
-      h('h3', 'Vote limits per person'),
+      h('h2.card-title', 'Vote limits per person'),
       h('div.grid-2',
         field('Total votes per person', input(d, 'max_votes_per_voter', 'number', { min: 0 }), '0 = unlimited. For paid events, this counts the number of votes bought.'),
         field('Different contestants per person', input(d, 'max_contestants_per_voter', 'number', { min: 0 }), '1 = may vote for only one contestant. 0 = unlimited.')),
@@ -517,13 +526,13 @@ async function tabRules(main, draft) {
         presetBtn('10 votes, spread freely', { max_votes_per_voter: 10, max_contestants_per_voter: 0, allow_repeat_contestant: true }),
         presetBtn('Unlimited paid votes', { pricing: 'paid', max_votes_per_voter: 0, max_contestants_per_voter: 0, allow_repeat_contestant: true }))),
     h('div.card.section.stack',
-      h('h3', 'Voter details to ask for'),
+      h('h2.card-title', 'Voter details to ask for'),
       check(d, 'require_name', 'Name / nickname (required)'),
       check(d, 'ask_email', 'Email address (required)'),
       check(d, 'ask_phone', 'Mobile number (required)'),
       field('Custom field (optional)', input(d, 'extra_field_label', 'text', { placeholder: 'e.g. Student ID, Section, Table no.' }), 'Leave this blank to not ask.')),
     h('div.card.section.stack',
-      h('h3', 'Anti-cheat'),
+      h('h2.card-title', 'Anti-cheat'),
       h('p.small.muted', 'The same browser is always treated as the same voter. Turn on more checks below to treat other matches as the same person too.'),
       check(d, 'limit_by_fingerprint', 'Device fingerprint (recommended)',
         'Recognises the same phone or PC even in incognito mode or after clearing data, using screen, GPU, fonts, canvas and audio signatures. Identical phone models (for example the same iPhone) can sometimes look alike.'),
@@ -534,7 +543,7 @@ async function tabRules(main, draft) {
       check(d, 'block_bots', 'Block automated / headless browsers'),
       field('Cooldown between votes (seconds)', input(d, 'cooldown_seconds', 'number', { min: 0 }), 'Slows down spam clicking.')),
     h('div.card.section.stack',
-      h('h3', 'Public display'),
+      h('h2.card-title', 'Public display'),
       check(d, 'show_live_results', 'Show live standings on the voting page'),
       check(d, 'show_vote_counts', 'Show vote counts publicly', 'When this is off, only the ranking bars are shown.')),
     h('div.row', { style: { marginTop: '1rem' } },
@@ -593,7 +602,7 @@ async function tabPayments(main) {
 
   fill(main,
     header('Payments',
-      select({ f: filter }, 'f', [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']]),
+      (() => { const sel = select({ f: filter }, 'f', [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']]); sel.setAttribute('aria-label', 'Show payments'); return sel; })(),
       filter === 'pending' && rows.length ? h('button.btn.ok.sm', { onclick: async () => {
         if (await confirmBox('Approve all?', `Approve all ${rows.length} pending payments?`, 'Approve all')) review(rows.map((r) => r.id), 'approved');
       } }, 'Approve all') : null),
@@ -647,7 +656,7 @@ async function tabVotes(main) {
     v.device_info?.private_mode_guess && 'Probably a private/incognito window',
   ].filter(Boolean);
 
-  const search = h('input', { type: 'text', placeholder: 'Search name, email, IP, contestant…', style: { maxWidth: '320px' } });
+  const search = h('input', { type: 'search', placeholder: 'Search name, email, IP, contestant…', 'aria-label': 'Search voters and votes', style: { maxWidth: '320px' } });
   const tableBox = h('div');
 
   const voterVotes = (id) => votes.filter((x) => x.voter_id === id && x.status !== 'rejected');
@@ -692,11 +701,11 @@ async function tabVotes(main) {
           h('td', x.quantity),
           ev.voting_mode === 'criteria' ? h('td.small.mono', x.scores ? Object.values(x.scores).join(' / ') : '—') : null,
           h('td', h('span.badge', { class: x.status }, x.status)),
-          h('td', h('button.btn.sm.ghost', { onclick: async () => {
+          h('td', h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
             if (!(await confirmBox('Delete vote?', 'Remove this vote permanently?', 'Delete', true))) return;
             const { error } = await sb.from('votes').delete().eq('id', x.id);
             if (error) toast(error.message, 'error'); else renderTab();
-          } }, '🗑'))))))) : h('div.card', h('p.muted', 'No votes yet.')));
+          }, 'aria-label': 'Delete this vote' }, icon('trash-2', 16)))))))) : h('div.card', h('p.muted', 'No votes yet.')));
     } else {
       const list = attempts.filter((a) => match(a.name, a.ip, a.code));
       fill(tableBox, list.length ? h('div.table-wrap', h('table',
@@ -715,7 +724,7 @@ async function tabVotes(main) {
   const approved = votes.filter((v) => v.status === 'approved').reduce((s, v) => s + v.quantity, 0);
   fill(main,
     header('Votes & voters',
-      h('button.btn.sm', { onclick: () => exportCsv(votes, voterById) }, '⬇ Export CSV'),
+      h('button.btn.sm', { onclick: () => exportCsv(votes, voterById) }, icon('download', 16), 'Export CSV'),
       h('button.btn.sm.danger', { onclick: async () => {
         if (!(await confirmBox('Reset all votes?', `This deletes EVERY vote, voter and log for "${ev.title}". Contestants and settings are kept. This cannot be undone.`, 'Reset votes', true))) return;
         const { error } = await sb.rpc('reset_event_votes', { p_event_id: ev.id });
@@ -771,7 +780,7 @@ async function tabScreenshot(main) {
   const save = () => localStorage.setItem('shot_opts', JSON.stringify(opts));
   const { data: crit } = await sb.from('criteria').select('id,name,weight').eq('event_id', ev.id).order('sort_order');
   const stage = h('div.stage');
-  const box = h('div.stage-scroll', stage);
+  const box = h('div.stage-scroll', { tabIndex: 0, role: 'region', 'aria-label': 'Standings preview' }, stage);
   let results = [];
 
   const drawStage = () => {
@@ -823,7 +832,7 @@ async function tabScreenshot(main) {
 
   const tableBox = h('div.section');
   const drawTable = () => {
-    fill(tableBox, h('h3', 'Detailed standings (admin only)'),
+    fill(tableBox, h('h2.card-title', 'Detailed standings (admin only)'),
       results.length ? h('div.table-wrap', h('table',
         h('thead', h('tr', ['Rank', 'Contestant', 'Votes', 'Pending', 'Voters', ev.voting_mode === 'criteria' ? 'Score' : null,
           ...(ev.voting_mode === 'criteria' ? (crit || []).map((c) => `${c.name} (${Number(c.weight)}%)`) : [])].filter(Boolean).map((t) => h('th', t)))),
@@ -871,9 +880,9 @@ async function tabScreenshot(main) {
 
   fill(main,
     header('Screenshot standings',
-      h('button.btn.sm', { onclick: load }, '↻ Refresh'),
-      h('button.btn.sm', { onclick: () => capture(true) }, 'Copy image'),
-      h('button.btn.primary', { onclick: () => capture(false) }, '📸 Capture PNG')),
+      h('button.btn.sm', { onclick: load }, icon('refresh-cw', 16), 'Refresh'),
+      h('button.btn.sm', { onclick: () => capture(true) }, icon('copy', 16), 'Copy image'),
+      h('button.btn.primary', { onclick: () => capture(false) }, icon('camera'), 'Capture PNG')),
     h('div.card.section',
       h('div.shot-tools',
         opt('names', 'Contestant identity', [['show', 'Show names & photos'], ['numbers', 'Numbers only'], ['hidden', 'Fully anonymous (A, B, C…)']]),

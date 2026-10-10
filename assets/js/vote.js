@@ -1,4 +1,4 @@
-import { sb, configured, $, h, fill, toast, modal, money, setTheme, notConfigured, uploadImage } from './lib.js';
+import { sb, configured, $, h, fill, icon, fieldError, toast, modal, money, setTheme, notConfigured, uploadImage } from './lib.js';
 import { getDevice } from './device.js';
 import { standingsList, initials } from './standings.js';
 
@@ -101,24 +101,24 @@ function render() {
     class: event.banner_url ? 'has-banner' : '',
     style: event.banner_url ? { backgroundImage: `url("${event.banner_url}")` } : {},
   }, h('div.hero-inner',
-    event.logo_url ? h('img.logo', { src: event.logo_url, alt: 'Logo' }) : null,
+    event.logo_url ? h('img.logo', { src: event.logo_url, alt: `${event.title} logo`, width: 96, height: 96 }) : null,
     h('div.grow',
       h('h1', event.title),
       event.subtitle ? h('p', event.subtitle) : null),
-    h('span.badge', { class: state.open ? 'open' : 'closed', style: { background: 'rgba(255,255,255,.9)' } },
+    h('span.badge.on-hero', { class: state.open ? 'open' : 'closed' },
       state.open ? 'Voting open' : state.text)));
 
   const info = h('div.info-bar',
     h('div.card',
-      h('h3', 'How to vote'),
+      h('h2.card-title', 'How to vote'),
       event.description ? h('p.small', event.description) : null,
       h('ul.rules.small', rulesList().map((t) => h('li', t))),
       myStatus?.blocked ? h('p.small', { style: { color: 'var(--bad)', fontWeight: 700 } }, 'This device has been blocked by the organizer.') :
       remaining != null ? h('p', h('b', `You have ${remaining} vote${remaining === 1 ? '' : 's'} left.`)) : null),
     criteria.length ? h('div.card',
-      h('h3', 'Judging criteria'),
+      h('h2.card-title', 'Judging criteria'),
       h('div.criteria-list', criteria.map((c) => h('div.criterion',
-        h('b', c.name), h('span.pct', `${Number(c.weight)}%`),
+        h('b', c.name), h('span.pct', { 'aria-label': `${Number(c.weight)} percent` }, `${Number(c.weight)}%`),
         c.description ? h('p', c.description) : null)))) : null);
 
   const grid = h('div.contestants', contestants.map((c) => {
@@ -126,16 +126,16 @@ function render() {
     const canVote = state.open && !myStatus?.blocked && (remaining == null || remaining > 0) &&
       (event.allow_repeat_contestant || !v);
     return h('article.contestant',
-      h('div.photo', { style: c.photo_url ? { backgroundImage: `url("${c.photo_url}")` } : {} },
-        c.photo_url ? null : h('div.initials', initials(c.name)),
+      h('div.photo', c.photo_url ? { role: 'img', 'aria-label': `Photo of ${c.name}`, style: { backgroundImage: `url("${c.photo_url}")` } } : {},
+        c.photo_url ? null : h('div.initials', { 'aria-hidden': 'true' }, initials(c.name)),
         c.number ? h('span.no', `#${c.number}`) : null,
         v ? h('span.voted', { class: v.status === 'pending' ? 'pending' : '' },
-          v.status === 'pending' ? `⏳ ${v.quantity} pending` : `✓ Voted${v.quantity > 1 ? ` ×${v.quantity}` : ''}`) : null),
+          v.status === 'pending' ? [icon('clock', 14), `${v.quantity} pending`] : [icon('check', 14), `Voted${v.quantity > 1 ? ` ×${v.quantity}` : ''}`]) : null),
       h('div.body',
         h('h3', c.name),
         c.description ? h('div.desc', c.description) : h('div.desc'),
-        h('button.btn.primary.block', { disabled: !canVote, onclick: () => openVote(c) },
-          !state.open ? 'Voting closed' : v && !event.allow_repeat_contestant ? 'Voted ✓' : 'Vote')));
+        h('button.btn.primary.block', { type: 'button', disabled: !canVote, onclick: () => openVote(c), 'aria-label': canVote ? `Vote for ${c.name}` : null },
+          !state.open ? 'Voting closed' : v && !event.allow_repeat_contestant ? [icon('check'), 'Voted'] : 'Vote')));
   }));
 
   fill(app, hero, h('main.wrap',
@@ -143,7 +143,7 @@ function render() {
     h('h2', 'Contestants'),
     contestants.length ? grid : h('p.muted', 'Contestants will appear here soon.'),
     event.show_live_results ? h('section', { style: { marginTop: '2.5rem' } },
-      h('h2', 'Live standings'), h('div#results', h('div.spinner'))) : null),
+      h('h2', 'Live standings'), h('div#results', h('div.spinner', { role: 'status', 'aria-label': 'Loading' }))) : null),
   h('footer.footer', 'Votes are protected against duplicates and spam.'));
 }
 
@@ -184,7 +184,12 @@ function openVote(c) {
       h('div.row', h('div', h('b', cr.name), h('span.muted.small', `  ${Number(cr.weight)}%`)), out),
       cr.description ? h('div.muted.small', cr.description) : null,
       h('input', { type: 'range', min: 1, max: event.score_max, step: 1, value: mid,
-        oninput: (e) => { scores[cr.id] = Number(e.target.value); out.textContent = e.target.value; } }));
+        'aria-label': `${cr.name} rating`, 'aria-valuetext': `${mid} out of ${event.score_max}`,
+        oninput: (e) => {
+          scores[cr.id] = Number(e.target.value);
+          out.textContent = e.target.value;
+          e.target.setAttribute('aria-valuetext', `${e.target.value} out of ${event.score_max}`);
+        } }));
   }) : [];
 
   const remaining = myStatus?.remaining;
@@ -194,8 +199,12 @@ function openVote(c) {
   const updateTotal = () => { total.textContent = `Total: ${money((Number(qty.value) || 0) * event.price_per_vote, event.currency)}`; };
   qty.addEventListener('input', updateTotal);
   updateTotal();
-  const ref = h('input', { type: 'text', placeholder: 'e.g. GCash reference no.' });
-  const proofName = h('span.muted.small', 'No file chosen');
+  const ref = h('input', { type: 'text', placeholder: 'e.g. GCash reference no.', autocomplete: 'off' });
+  const proofName = h('span.muted.small#proof-name', { 'aria-live': 'polite' }, 'No file chosen');
+  const proofInput = h('input', { type: 'file', accept: 'image/*', class: 'hidden', tabIndex: -1, onchange: (e) => {
+    proofFile = e.target.files[0] || null;
+    proofName.textContent = proofFile ? proofFile.name : 'No file chosen';
+  } });
 
   const payment = paid ? h('div.pay-box.stack',
     h('label.field', h('span', `Number of votes (max ${maxQty})`), qty),
@@ -204,12 +213,8 @@ function openVote(c) {
     event.payment_qr_url ? h('img', { src: event.payment_qr_url, alt: 'Payment QR code' }) : null,
     h('label.field', h('span', 'Payment reference number'), ref),
     h('div.row',
-      h('label.btn.sm', 'Upload receipt',
-        h('input', { type: 'file', accept: 'image/*', class: 'hidden', onchange: (e) => {
-          proofFile = e.target.files[0] || null;
-          proofName.textContent = proofFile ? proofFile.name : 'No file chosen';
-        } })),
-      proofName),
+      h('button.btn', { type: 'button', 'aria-describedby': 'proof-name', onclick: () => proofInput.click() }, icon('upload'), 'Upload receipt'),
+      proofInput, proofName),
     h('small.muted', event.require_payment_proof ? 'A reference number or a receipt screenshot is required.' : 'Optional.')) : null;
 
   const body = h('div.stack',
@@ -217,14 +222,16 @@ function openVote(c) {
       c.photo_url ? h('img', { src: c.photo_url, alt: '', style: { width: '64px', height: '64px', objectFit: 'cover', borderRadius: '12px' } }) : null,
       h('div', h('div.muted.small', c.number ? `#${c.number}` : 'Contestant'), h('h3', { style: { margin: 0 } }, c.name))),
     identityFields.length ? h('div.stack', identityFields) : null,
-    scoreRows.length ? h('div', h('h4', 'Your ratings'), scoreRows) : null,
+    scoreRows.length ? h('div', h('h3.card-title', 'Your ratings'), scoreRows) : null,
     payment);
 
   modal(`Vote for ${c.name}`, body, [
     { label: 'Cancel', value: null },
     { label: paid ? 'Submit vote' : 'Confirm vote', class: 'primary', onClick: async () => {
       const identity = Object.fromEntries(Object.entries(fields).map(([k, el]) => [k, el.value.trim()]));
-      if (event.require_name && (identity.name || '').length < 2) { toast('Please enter your name.', 'error'); return false; }
+      Object.values(fields).forEach((el) => fieldError(el, ''));
+      if (paid) fieldError(ref, '');
+      if (event.require_name && (identity.name || '').length < 2) { fieldError(fields.name, 'Please enter your name.'); return false; }
       saveIdentity({ ...savedIdentity(), ...identity });
 
       let proofPath = null;
@@ -243,6 +250,10 @@ function openVote(c) {
       });
       if (error) { toast(error.message, 'error'); return false; }
       if (!data.ok) {
+        // Show field problems next to the field; everything else as a toast.
+        const target = { NAME_REQUIRED: fields.name, EMAIL_REQUIRED: fields.email, PHONE_REQUIRED: fields.phone,
+          EXTRA_REQUIRED: fields.extra, PAYMENT_REQUIRED: ref, BAD_QUANTITY: qty }[data.code];
+        if (target) { fieldError(target, data.message); return false; }
         toast(data.message, 'error');
         if (['LIMIT_REACHED', 'ALREADY_VOTED', 'CONTESTANT_LIMIT', 'BLOCKED', 'VOTING_CLOSED'].includes(data.code)) {
           await refreshStatus(); render(); loadResults();
