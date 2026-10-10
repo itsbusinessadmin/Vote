@@ -1,4 +1,4 @@
-import { sb, configured, $, h, fill, icon, fieldError, toast, modal, money, setTheme, notConfigured, uploadImage } from './lib.js';
+import { sb, configured, $, h, fill, icon, fieldError, toast, modal, money, setTheme, notConfigured, uploadImage, cleanUrl } from './lib.js';
 import { getDevice } from './device.js';
 import { standingsList, initials } from './standings.js';
 import { rulesList } from './rules.js';
@@ -127,12 +127,19 @@ function render() {
     const v = votedInfo(c.id);
     const canVote = state.open && !myStatus?.blocked && (remaining == null || remaining > 0) &&
       (event.allow_repeat_contestant || !v);
+    const link = cleanUrl(c.link_url);
+    // The photo doubles as a button: play the video, or open the link in a new tab.
+    const photoTag = c.video_url ? 'button.photo.media' : link ? 'a.photo.media' : 'div.photo';
+    const photoAttrs = c.video_url ? { type: 'button', onclick: () => playVideo(c, link), 'aria-label': `Play ${c.name}'s video` }
+      : link ? { href: link, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${c.name}'s link (opens in a new tab)` } : {};
     return h('article.contestant',
-      h('div.photo',
+      h(photoTag, photoAttrs,
         c.photo_url
           // Lazy-load photos below the fold; the first few load right away.
-          ? h('img', { src: c.photo_url, alt: `Photo of ${c.name}`, width: 400, height: 500, decoding: 'async', loading: i < 4 ? 'eager' : 'lazy' })
+          ? h('img', { src: c.photo_url, alt: photoTag === 'div.photo' ? `Photo of ${c.name}` : '', width: 400, height: 500, decoding: 'async', loading: i < 4 ? 'eager' : 'lazy' })
           : h('div.initials', { 'aria-hidden': 'true' }, initials(c.name)),
+        c.video_url ? h('span.media-badge', { 'aria-hidden': 'true' }, h('span.play-circle', icon('play', 28)), h('span', 'Watch'))
+          : link ? h('span.media-badge.link', { 'aria-hidden': 'true' }, icon('external-link', 16), h('span', 'Open link')) : null,
         c.number ? h('span.no', `#${c.number}`) : null,
         v ? h('span.voted', { class: v.status === 'pending' ? 'pending' : '' },
           v.status === 'pending' ? [icon('clock', 14), `${v.quantity} pending`] : [icon('check', 14), `Voted${v.quantity > 1 ? ` ×${v.quantity}` : ''}`]) : null),
@@ -161,6 +168,22 @@ async function loadResults() {
   const box = $('#results'); // re-read: the page may have re-rendered meanwhile
   if (!data || !box) return;
   fill(box, data.length ? standingsList(data, event, { showCounts: event.show_vote_counts }) : h('p.muted', 'No votes yet.'));
+}
+
+// ---------------------------------------------------------------------
+// Video player pop-up
+// ---------------------------------------------------------------------
+function playVideo(c, link) {
+  const video = h('video.player', { src: c.video_url, controls: true, autoplay: true, playsInline: true, preload: 'auto',
+    poster: c.photo_url || null });
+  video.addEventListener('error', () => {
+    video.replaceWith(h('p.player-error', 'This video could not be played on this device.'));
+  }, { once: true });
+  // Closing the pop-up removes the <video>, which stops playback.
+  modal(c.number ? `#${c.number} · ${c.name}` : c.name, h('div.player-wrap', video,
+    link ? h('a.btn.sm', { href: link, target: '_blank', rel: 'noopener noreferrer', style: { marginTop: '.75rem' } },
+      'Open link', icon('external-link', 16), h('span.sr-only', '(opens in a new tab)')) : null),
+  [], { className: 'video-modal' });
 }
 
 // ---------------------------------------------------------------------

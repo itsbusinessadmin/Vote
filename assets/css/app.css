@@ -331,3 +331,29 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
   .rules-summary { position: static; order: -1; }
   .indent { margin-left: 0; }
 }
+
+/* ----- contestant video / link ----- */
+.photo.media { display: block; width: 100%; padding: 0; border: 0; margin: 0; font: inherit; color: inherit; text-decoration: none; cursor: pointer; background: var(--surface-2); }
+.photo.media img, .photo.media .initials { transition: transform .25s ease, filter .25s ease; }
+.photo.media:hover img, .photo.media:focus-visible img { transform: scale(1.03); filter: brightness(.85); }
+.photo.media:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.media-badge { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: .35rem;
+  color: #fff; font-weight: 700; font-size: .85rem; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); pointer-events: none; }
+.media-badge .play-circle { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, .55);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35); padding-left: 4px; transition: transform .2s ease, background .2s ease; }
+.photo.media:hover .play-circle { transform: scale(1.08); background: var(--brand); }
+.media-badge.link { left: auto; right: 10px; top: auto; bottom: 10px; transform: none; display: inline-flex; align-items: center; gap: .3rem;
+  background: rgba(0, 0, 0, .65); padding: .3rem .6rem; border-radius: 999px; text-shadow: none; font-size: .8rem; }
+
+.video-modal { width: min(960px, 100%); background: #0b0a10; color: #fff; }
+.video-modal .modal-head .icon-btn { color: #fff; }
+.video-modal .icon-btn:hover { background: rgba(255, 255, 255, .12); }
+.player-wrap { display: flex; flex-direction: column; align-items: flex-start; }
+.player { display: block; width: 100%; max-height: 72vh; background: #000; border-radius: 12px; }
+.player-error { padding: 2rem 1rem; text-align: center; width: 100%; background: #000; border-radius: 12px; margin: 0; }
+
+.media-box { border: 1px solid var(--border); border-radius: 12px; padding: .9rem; }
+.media-box p { margin: 0; }
+.field-label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: .3rem; }
+.video-box { display: grid; gap: .5rem; }
+.video-box video { width: 100%; max-height: 220px; background: #000; border-radius: 10px; }

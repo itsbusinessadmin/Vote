@@ -87,7 +87,7 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([t
 // Accessible dialog: named by its title, Escape closes, Tab stays inside,
 // focus returns to the opener on close.
 let dialogSeq = 0;
-export function modal(title, body, actions = []) {
+export function modal(title, body, actions = [], { className = '' } = {}) {
   return new Promise((resolve) => {
     const opener = document.activeElement;
     const titleId = `dlg-${++dialogSeq}`;
@@ -106,7 +106,7 @@ export function modal(title, body, actions = []) {
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     };
-    const dialog = h('div.modal', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
+    const dialog = h('div.modal', { class: className, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
       h('div.modal-head', h('h2', { id: titleId }, title),
         h('button.icon-btn', { type: 'button', onclick: () => close(null), 'aria-label': 'Close' }, icon('x', 20))),
       h('div.modal-body', body),
@@ -176,6 +176,32 @@ export async function uploadImage(bucket, folder, file, maxSide) {
   if (error) throw error;
   if (bucket === 'proofs') return path;
   return sb.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+}
+
+export const MAX_VIDEO_MB = 50;
+
+// Videos are uploaded as-is (no re-encoding in the browser).
+export async function uploadVideo(folder, file) {
+  if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+    throw new Error(`The video is ${(file.size / 1048576).toFixed(0)} MB. The limit is ${MAX_VIDEO_MB} MB; trim or compress it first.`);
+  }
+  const ext = (file.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+  const type = file.type || (ext === 'mov' ? 'video/quicktime' : `video/${ext}`);
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await sb.storage.from('videos').upload(path, file, { contentType: type, upsert: false });
+  if (error) throw error;
+  return sb.storage.from('videos').getPublicUrl(path).data.publicUrl;
+}
+
+// Accepts "youtube.com/..." as well as full URLs; returns null for anything
+// that is not an http(s) link.
+export function cleanUrl(text) {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(t) ? t : `https://${t}`);
+    return /^https?:$/.test(u.protocol) && u.hostname.includes('.') ? u.href : null;
+  } catch { return null; }
 }
 
 export function pickFile(accept = 'image/*') {

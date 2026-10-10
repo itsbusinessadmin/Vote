@@ -94,6 +94,8 @@ create table if not exists public.contestants (
   name        text not null,
   description text,
   photo_url   text,
+  link_url    text,  -- optional web page; the tile opens it in a new tab
+  video_url   text,  -- optional uploaded video; the tile plays it in a pop-up
   sort_order  int  not null default 0,
   active      boolean not null default true,
   created_at  timestamptz not null default now()
@@ -130,6 +132,12 @@ create table if not exists public.voters (
   last_seen_at  timestamptz not null default now()
 );
 -- Columns added after the first release (no-ops on fresh installs).
+alter table public.contestants add column if not exists link_url text;
+alter table public.contestants add column if not exists video_url text;
+-- Only web links; blocks javascript: and other unsafe schemes.
+do $$ begin
+  alter table public.contestants add constraint contestants_link_url_http check (link_url is null or link_url ~* '^https?://');
+exception when duplicate_object then null; end $$;
 alter table public.events add column if not exists limit_by_cross_browser boolean not null default true;
 alter table public.voters add column if not exists cross_id text;
 alter table public.events add column if not exists email_domains text;
@@ -606,6 +614,17 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values ('proofs', 'proofs', false, 3145728, array['image/png', 'image/jpeg', 'image/webp'])
 on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit,
   allowed_mime_types = excluded.allowed_mime_types;
+
+-- Contestant videos. 50 MB is the largest single file the Supabase free plan allows.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('videos', 'videos', true, 52428800, array['video/mp4', 'video/webm', 'video/quicktime'])
+on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "videos admin write" on storage.objects;
+create policy "videos admin write" on storage.objects for all to authenticated
+  using (bucket_id = 'videos' and public.is_admin())
+  with check (bucket_id = 'videos' and public.is_admin());
 
 drop policy if exists "assets admin write" on storage.objects;
 create policy "assets admin write" on storage.objects for all to authenticated

@@ -1,6 +1,6 @@
 import {
   sb, configured, $, h, fill, icon, fieldError, toast, modal, confirmBox, money, setTheme, notConfigured,
-  uploadImage, pickFile, downloadText, slugify, voteUrl,
+  uploadImage, uploadVideo, cleanUrl, MAX_VIDEO_MB, pickFile, downloadText, slugify, voteUrl,
 } from './lib.js';
 import * as config from './config.js';
 import { getDevice } from './device.js';
@@ -403,6 +403,7 @@ async function tabContestants(main) {
       h('div',
         h('b', c.name), c.number ? h('span.muted', `  #${c.number}`) : null,
         !c.active ? h('span.badge', { style: { marginLeft: '.5rem' } }, 'hidden') : null,
+        c.video_url ? h('span.badge', { style: { marginLeft: '.5rem' } }, 'video') : c.link_url ? h('span.badge', { style: { marginLeft: '.5rem' } }, 'link') : null,
         c.description ? h('div.muted.small', c.description) : null),
       h('div.actions',
         h('button.btn.sm.icon-only', { type: 'button', onclick: () => move(i, -1), disabled: i === 0, 'aria-label': `Move ${c.name} up` }, icon('arrow-up', 16)),
@@ -411,7 +412,9 @@ async function tabContestants(main) {
         h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
           if (!(await confirmBox('Delete contestant?', `Delete ${c.name} and all of their votes?`, 'Delete', true))) return;
           const { error: err } = await sb.from('contestants').delete().eq('id', c.id);
-          if (err) toast(err.message, 'error'); else renderTab();
+          if (err) return toast(err.message, 'error');
+          deleteVideo(c.video_url);
+          renderTab();
         }, 'aria-label': `Delete ${c.name}` }, icon('trash-2', 16)))))) : h('div.card', h('p.muted', 'No contestants yet. Add your first one.')));
 }
 
@@ -428,8 +431,44 @@ async function reorder(table, list, i, j) {
   renderTab();
 }
 
+// Delete an uploaded video file (best effort) so it doesn't use up storage.
+function deleteVideo(url) {
+  const path = url && decodeURIComponent(url.split('/object/public/videos/')[1] || '');
+  if (path) sb.storage.from('videos').remove([path]).catch(() => {});
+}
+
 async function editContestant(c, order = 0) {
-  const d = c ? { ...c } : { name: '', number: '', description: '', photo_url: null, active: true };
+  const d = c ? { ...c } : { name: '', number: '', description: '', photo_url: null, link_url: '', video_url: null, active: true };
+  const nameIn = input(d, 'name', 'text', { placeholder: 'Contestant name' });
+  const linkIn = input(d, 'link_url', 'url', { placeholder: 'https://youtube.com/watch?v=…', inputMode: 'url' });
+  let uploading = false;
+  const videoBox = h('div.video-box');
+  const drawVideo = (status) => fill(videoBox,
+    d.video_url ? h('video', { src: d.video_url, controls: true, preload: 'metadata', playsInline: true }) : null,
+    h('div.row',
+      h('button.btn.sm', { type: 'button', disabled: uploading, onclick: async () => {
+        const f = await pickFile('video/mp4,video/webm,video/quicktime,video/*');
+        if (!f) return;
+        uploading = true;
+        drawVideo(`Uploading ${f.name}…`);
+        try {
+          const url = await uploadVideo(`${ev.id}/contestants`, f);
+          if (d.video_url && d.video_url !== c?.video_url) deleteVideo(d.video_url); // unsaved earlier upload
+          d.video_url = url;
+          uploading = false;
+          drawVideo('Video uploaded');
+        } catch (err) {
+          uploading = false;
+          drawVideo('');
+          toast('Video upload failed: ' + err.message, 'error');
+        }
+      } }, icon('upload', 16), d.video_url ? 'Replace video' : 'Upload video'),
+      d.video_url && !uploading ? h('button.btn.sm.ghost', { type: 'button', onclick: () => {
+        if (d.video_url !== c?.video_url) deleteVideo(d.video_url); // never saved, safe to delete now
+        d.video_url = null; drawVideo('');
+      } }, 'Remove video') : null,
+      h('span.small.muted', { role: 'status' }, status || (d.video_url ? '' : 'No video'))));
+  drawVideo('');
   const prev = h('div.preview', { style: d.photo_url ? { backgroundImage: `url("${d.photo_url}")`, backgroundSize: 'cover' } : {} }, d.photo_url ? '' : 'No photo');
   const body = h('div.stack',
     h('div.upload', prev, h('div.row',
@@ -446,24 +485,41 @@ async function editContestant(c, order = 0) {
       } }, 'Upload photo'),
       h('button.btn.sm.ghost', { onclick: () => { d.photo_url = null; prev.style.backgroundImage = ''; prev.textContent = 'No photo'; } }, 'Remove'))),
     h('div.grid-2',
-      field('Name', input(d, 'name', 'text', { placeholder: 'Contestant name' })),
+      field('Name', nameIn),
       field('Number / code', input(d, 'number', 'text', { placeholder: 'e.g. 7' }))),
     field('Description', input(d, 'description', 'textarea', { placeholder: 'Song title, school, short bio…' })),
+    h('div.media-box.stack',
+      h('h3.card-title', 'Video or link (optional)'),
+      h('p.small.muted', 'Voters tap the photo to watch the video in a pop-up player, or to open the link in a new tab.'),
+      h('div.field',
+        h('span.field-label', 'Video'),
+        videoBox,
+        h('small.muted', `MP4, WebM or MOV, up to ${MAX_VIDEO_MB} MB. Large videos can take a minute to upload.`)),
+      field('Link', linkIn, 'For example a YouTube, Facebook or TikTok post. Used when there is no uploaded video.')),
     check(d, 'active', 'Visible to voters', 'Untick to hide this contestant without deleting their votes.'));
 
-  await modal(c ? 'Edit contestant' : 'Add contestant', body, [
+  const saved = await modal(c ? 'Edit contestant' : 'Add contestant', body, [
     { label: 'Cancel', value: null },
     { label: 'Save', class: 'primary', onClick: async () => {
-      if (!d.name.trim()) { toast('Name is required', 'error'); return false; }
-      const row = { name: d.name.trim(), number: d.number || null, description: d.description || null, photo_url: d.photo_url, active: d.active };
+      fieldError(nameIn, ''); fieldError(linkIn, '');
+      if (uploading) { toast('Wait for the video to finish uploading.', 'error'); return false; }
+      if (!d.name.trim()) { fieldError(nameIn, 'Name is required.'); return false; }
+      const link = cleanUrl(d.link_url);
+      if (String(d.link_url || '').trim() && !link) { fieldError(linkIn, 'Enter a web link starting with http:// or https://'); return false; }
+      const row = { name: d.name.trim(), number: d.number || null, description: d.description || null, photo_url: d.photo_url,
+        link_url: link, video_url: d.video_url || null, active: d.active };
       const { error } = c
         ? await sb.from('contestants').update(row).eq('id', c.id)
         : await sb.from('contestants').insert({ ...row, event_id: ev.id, sort_order: order });
       if (error) throw error;
+      if (c?.video_url && c.video_url !== row.video_url) deleteVideo(c.video_url); // replaced or removed
       toast('Saved', 'success');
       renderTab();
+      return true;
     } },
   ]);
+  // Closed without saving: discard a video uploaded in this dialog.
+  if (!saved && d.video_url && d.video_url !== c?.video_url) deleteVideo(d.video_url);
 }
 
 // ---------------------------------------------------------------------
