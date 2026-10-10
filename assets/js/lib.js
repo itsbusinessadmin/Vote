@@ -1,11 +1,12 @@
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import { icon } from './icons.js';
 
 export { icon };
 
+// supabase-js is loaded by a classic <script defer> in the page (window.supabase).
 export const configured = !SUPABASE_URL.includes('YOUR-PROJECT') && !SUPABASE_ANON_KEY.includes('YOUR-ANON');
-export const sb = configured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+if (configured && !window.supabase) throw new Error('Could not load the Supabase library. Check your internet connection and reload.');
+export const sb = configured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 // ---------------------------------------------------------------------
 // DOM helpers
@@ -133,10 +134,6 @@ export const confirmBox = (title, text, okLabel = 'Confirm', danger = false) =>
     { label: 'Cancel', value: false },
     { label: okLabel, value: true, class: danger ? 'danger' : 'primary' },
   ]);
-
-export function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
 
 export function money(n, cur = 'PHP') {
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur }).format(n || 0); }

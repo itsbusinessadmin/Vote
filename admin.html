@@ -5,12 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Vote Admin</title>
   <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
   <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
   <div id="app"><div class="spinner" role="status" aria-label="Loading"></div></div>
+  <!-- One self-contained file (the ESM build loads its dependencies one after another) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" crossorigin="anonymous" defer></script>
   <script type="module" src="assets/js/admin.js"></script>
 </body>
 </html>

@@ -160,6 +160,7 @@ input[type=range] { width: 100%; accent-color: var(--brand); }
 .contestants { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 .contestant { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow); }
 .contestant .photo { aspect-ratio: 4 / 5; background: var(--surface-2) center / cover no-repeat; position: relative; }
+.contestant .photo > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .contestant .photo .no { position: absolute; top: 10px; left: 10px; background: var(--brand); color: #fff; font-weight: 800; border-radius: 999px; padding: .15rem .6rem; font-size: .85rem; }
 .contestant .photo .voted { display: inline-flex; align-items: center; gap: .25rem; position: absolute; top: 10px; right: 10px; background: var(--ok); color: #fff; font-weight: 700; border-radius: 999px; padding: .15rem .6rem; font-size: .78rem; }
 .contestant .photo .voted.pending { background: var(--warn); }

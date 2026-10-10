@@ -5,7 +5,7 @@ import {
 import * as config from './config.js';
 import { getDevice } from './device.js';
 import { rulesList } from './rules.js';
-import { standingsList, rankResults, displayName, initials, valueLabel } from './standings.js';
+import { rankResults, displayName, initials, valueLabel } from './standings.js';
 
 const app = $('#app');
 // Older config.js files have no ADMIN_EMAIL; fall back to the default.
@@ -129,7 +129,10 @@ async function loadEvents() {
 
 async function saveEvent(patch, quiet = false) {
   const { data, error } = await sb.from('events').update(patch).eq('id', ev.id).select().single();
-  if (error) { toast(error.message, 'error'); return false; }
+  if (error) {
+    toast(/events_slug_key|duplicate key/.test(error.message) ? 'That link name is already used by another event. Choose a different one.' : error.message, 'error');
+    return false;
+  }
   Object.assign(ev, data);
   setTheme(ev.theme_color);
   if (!quiet) toast('Saved', 'success');
@@ -148,10 +151,9 @@ async function fetchAll(build) {
 }
 
 async function countPending() {
-  if (!ev) return 0;
+  if (!ev) return;
   const { count } = await sb.from('votes').select('id', { count: 'exact', head: true }).eq('event_id', ev.id).eq('status', 'pending');
-  pendingCount = count || 0;
-  renderSide();
+  if ((count || 0) !== pendingCount) { pendingCount = count || 0; renderSide(); }
 }
 
 async function createEvent() {
@@ -166,7 +168,7 @@ async function createEvent() {
       return data;
     } },
   ]);
-  if (!res) return;
+  if (!res) { renderSide(); return; }
   events.unshift(res);
   selectEvent(res.id);
 }
@@ -185,7 +187,6 @@ function renderShell() {
   fill(app, h('div.admin', h('aside.side#side'), h('main.main#main')));
   renderSide();
   renderTab();
-  countPending();
 }
 
 function renderSide() {
@@ -239,10 +240,25 @@ function renderTab() {
       h('button.btn.primary', { onclick: createEvent }, icon('plus'), 'Create event')));
     return;
   }
-  fill(main, h('div.spinner', { role: 'status', 'aria-label': 'Loading' }));
+  // Each render gets its own container. If the admin switches tabs before a
+  // slow tab finishes loading, that tab draws into a detached container and
+  // never overwrites the tab that is showing now.
+  const view = h('div.view', h('div.spinner', { role: 'status', 'aria-label': 'Loading' }));
+  fill(main, view);
+  countPending();
   ({ event: tabEvent, contestants: tabContestants, criteria: tabCriteria, rules: tabRules,
-    payments: tabPayments, votes: tabVotes, screenshot: tabScreenshot }[tab] || tabEvent)(main)
-    .catch((e) => { console.error(e); fill(main, h('p', { style: { color: 'var(--bad)' } }, e.message)); });
+    payments: tabPayments, votes: tabVotes, screenshot: tabScreenshot }[tab] || tabEvent)(view)
+    .catch((e) => { console.error(e); fill(view, h('p', { style: { color: 'var(--bad-ink)' } }, e.message)); });
+}
+
+// Repeat fn every ms while this view is on screen and the browser tab is visible.
+function poll(view, fn, ms) {
+  if (!view.isConnected) return;
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    if (!view.isConnected) clearInterval(refreshTimer);
+    else if (!document.hidden) fn();
+  }, ms);
 }
 
 // ---------------------------------------------------------------------
@@ -273,9 +289,13 @@ function select(obj, key, options) {
   return el;
 }
 
-function imageUpload(label, key, { wide = false, hint, maxSide = 1200 } = {}) {
+// Uploads and removals save immediately and redraw only this widget, so
+// unsaved edits elsewhere on the page are kept.
+function imageUpload(label, key, opts = {}) {
+  const { wide = false, hint, maxSide = 1200 } = opts;
+  const redraw = () => widget.replaceWith(imageUpload(label, key, opts));
   const prev = h('div.preview', { class: wide ? 'wide' : '', style: ev[key] ? { backgroundImage: `url("${ev[key]}")` } : {} }, ev[key] ? '' : 'No image');
-  return h('div.field',
+  const widget = h('div.field',
     h('span', { style: { display: 'block', fontSize: '.85rem', fontWeight: 600, marginBottom: '.3rem' } }, label),
     h('div.upload', prev, h('div.stack',
       h('div.row',
@@ -285,17 +305,15 @@ function imageUpload(label, key, { wide = false, hint, maxSide = 1200 } = {}) {
           e.target.disabled = true;
           try {
             const url = await uploadImage('assets', ev.id, file, maxSide);
-            if (await saveEvent({ [key]: url })) {
-              prev.style.backgroundImage = `url("${url}")`;
-              prev.textContent = '';
-            }
+            if (await saveEvent({ [key]: url })) return redraw();
           } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
           e.target.disabled = false;
         } }, ev[key] ? 'Change' : 'Upload'),
-        ev[key] ? h('button.btn.sm.ghost', { onclick: async () => {
-          if (await saveEvent({ [key]: null })) renderTab();
+        ev[key] ? h('button.btn.sm.ghost', { type: 'button', onclick: async () => {
+          if (await saveEvent({ [key]: null })) redraw();
         } }, 'Remove') : null),
       hint ? h('small.muted', hint) : null)));
+  return widget;
 }
 
 // ---------------------------------------------------------------------
@@ -321,7 +339,8 @@ async function tabEvent(main) {
       h('div.share', qrBox, h('div.stack.grow',
         h('code', { style: { wordBreak: 'break-all' } }, url),
         h('div.row',
-          h('button.btn.sm.primary', { onclick: () => navigator.clipboard.writeText(url).then(() => toast('Link copied', 'success')) }, 'Copy link'),
+          h('button.btn.sm.primary', { onclick: () => navigator.clipboard.writeText(url)
+            .then(() => toast('Link copied', 'success'), () => toast('Could not copy. Select the link and copy it manually.', 'error')) }, 'Copy link'),
           h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'Open', icon('external-link', 16), h('span.sr-only', '(opens in a new tab)'))),
         h('small.muted', ev.status === 'draft' ? 'The event is a draft. Set the status to Open so the audience can see it.' : '')))),
     h('div.card.section.stack',
@@ -346,6 +365,10 @@ async function tabEvent(main) {
     h('div.row', { style: { marginTop: '1rem' } },
       h('button.btn.primary', { onclick: async () => {
         d.slug = slugify(d.slug || d.title);
+        if (!String(d.title || '').trim()) return toast('The event needs a title.', 'error');
+        if (d.starts_at && d.ends_at && Date.parse(d.ends_at) <= Date.parse(d.starts_at)) {
+          return toast('"Closes at" must be after "Opens at".', 'error');
+        }
         const { title, subtitle, description, slug, theme_color, status, starts_at, ends_at } = d;
         if (await saveEvent({ title, subtitle, description, slug, theme_color, status, starts_at, ends_at })) {
           events = events.map((e) => (e.id === ev.id ? ev : e));
@@ -371,13 +394,7 @@ async function tabContestants(main) {
   const { data: list, error } = await sb.from('contestants').select('*').eq('event_id', ev.id).order('sort_order').order('created_at');
   if (error) throw error;
 
-  const move = async (i, dir) => {
-    const j = i + dir;
-    if (j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-    await Promise.all(list.map((c, k) => sb.from('contestants').update({ sort_order: k }).eq('id', c.id)));
-    renderTab();
-  };
+  const move = (i, dir) => reorder('contestants', list, i, i + dir);
 
   fill(main,
     header('Contestants', h('button.btn.primary', { onclick: () => editContestant(null, list.length) }, icon('plus'), 'Add contestant')),
@@ -396,6 +413,19 @@ async function tabContestants(main) {
           const { error: err } = await sb.from('contestants').delete().eq('id', c.id);
           if (err) toast(err.message, 'error'); else renderTab();
         }, 'aria-label': `Delete ${c.name}` }, icon('trash-2', 16)))))) : h('div.card', h('p.muted', 'No contestants yet. Add your first one.')));
+}
+
+// Swap two rows. Only those two are written, unless earlier edits left
+// duplicate sort orders, in which case the whole list is renumbered once.
+async function reorder(table, list, i, j) {
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  const unique = new Set(list.map((x) => x.sort_order)).size === list.length;
+  const changed = unique ? [[list[i], list[j].sort_order], [list[j], list[i].sort_order]] : list.map((x, k) => [x, k]);
+  const results = await Promise.all(changed.map(([x, order]) => sb.from(table).update({ sort_order: order }).eq('id', x.id)));
+  const failed = results.find((r) => r.error);
+  if (failed) toast(failed.error.message, 'error');
+  renderTab();
 }
 
 async function editContestant(c, order = 0) {
@@ -452,17 +482,14 @@ async function tabCriteria(main) {
         h('small.muted', ev.voting_mode === 'criteria'
           ? 'Voters rate every criterion, and the weights decide the final score.'
           : 'Voters see these criteria as a guide. Switch to "Rate each criterion" in Voting rules to use the weights in scoring.')),
-      Math.abs(total - 100) >= 0.01 && list.length ? h('p.small', { style: { color: 'var(--warn)', marginTop: '.5rem' } },
+      Math.abs(total - 100) >= 0.01 && list.length ? h('p.small', { style: { color: 'var(--warn-ink)', marginTop: '.5rem' } },
         'Tip: the weights should add up to 100%. Scores are normalised either way.') : null),
     list.length ? h('div.section', list.map((c, i) => h('div.list-item',
-      h('div.thumb', { style: { fontSize: '1rem', color: 'var(--brand)' } }, `${Number(c.weight)}%`),
+      h('div.thumb', { style: { fontSize: '1rem', color: 'var(--brand-text)' } }, `${Number(c.weight)}%`),
       h('div', h('b', c.name), c.description ? h('div.muted.small', c.description) : null),
       h('div.actions',
-        h('button.btn.sm.icon-only', { type: 'button', disabled: i === 0, onclick: async () => {
-          [list[i - 1], list[i]] = [list[i], list[i - 1]];
-          await Promise.all(list.map((x, k) => sb.from('criteria').update({ sort_order: k }).eq('id', x.id)));
-          renderTab();
-        }, 'aria-label': `Move ${c.name} up` }, icon('arrow-up', 16)),
+        h('button.btn.sm.icon-only', { type: 'button', disabled: i === 0, onclick: () => reorder('criteria', list, i, i - 1),
+          'aria-label': `Move ${c.name} up` }, icon('arrow-up', 16)),
         h('button.btn.sm', { onclick: () => editCriterion(c) }, 'Edit'),
         h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
           if (!(await confirmBox('Delete criterion?', `Delete "${c.name}"? Ratings already given for it will no longer count.`, 'Delete', true))) return;
@@ -671,16 +698,18 @@ async function tabRules(main, draft) {
 // ---------------------------------------------------------------------
 async function tabPayments(main) {
   const filter = localStorage.getItem('pay_filter') || 'pending';
-  const rows = await fetchAll(() => {
-    let q = sb.from('votes').select('*, voters(name,email,phone,extra), contestants(name,number)')
-      .eq('event_id', ev.id).not('amount', 'is', null).order('created_at', { ascending: false });
-    if (filter !== 'all') q = q.eq('status', filter);
-    return q;
-  });
-  const { data: allPaid } = await sb.from('votes').select('amount,status,quantity').eq('event_id', ev.id).not('amount', 'is', null);
-  const sum = (s) => (allPaid || []).filter((v) => v.status === s).reduce((a, v) => a + Number(v.amount), 0);
+  const [rows, allPaid] = await Promise.all([
+    fetchAll(() => {
+      let q = sb.from('votes').select('*, voters(name,email,phone,extra), contestants(name,number)')
+        .eq('event_id', ev.id).not('amount', 'is', null).order('created_at', { ascending: false }).order('id');
+      if (filter !== 'all') q = q.eq('status', filter);
+      return q;
+    }),
+    fetchAll(() => sb.from('votes').select('amount,status').eq('event_id', ev.id).not('amount', 'is', null).order('id')),
+  ]);
+  const sum = (s) => allPaid.filter((v) => v.status === s).reduce((a, v) => a + Number(v.amount), 0);
 
-  const paths = rows.filter((r) => r.proof_path).map((r) => r.proof_path);
+  const paths = rows.slice(0, PAGE).filter((r) => r.proof_path).map((r) => r.proof_path);
   const signed = {};
   if (paths.length) {
     const { data } = await sb.storage.from('proofs').createSignedUrls(paths, 3600);
@@ -705,10 +734,10 @@ async function tabPayments(main) {
     h('div.stats',
       stat(money(sum('approved'), ev.currency), 'Approved total'),
       stat(money(sum('pending'), ev.currency), 'Awaiting review'),
-      stat(String((allPaid || []).filter((v) => v.status === 'pending').length), 'Pending payments')),
+      stat(String(allPaid.filter((v) => v.status === 'pending').length), 'Pending payments')),
     rows.length ? h('div.table-wrap', h('table',
       h('thead', h('tr', ['Receipt', 'Voter', 'Contestant', 'Votes', 'Amount', 'Reference', 'Time', 'Status', ''].map((t) => h('th', t)))),
-      h('tbody', rows.map((r) => h('tr',
+      pagedBody(rows, (r) => h('tr',
         h('td', r.proof_path && signed[r.proof_path]
           ? h('img.proof-thumb', { src: signed[r.proof_path], alt: 'receipt', onclick: () => modal('Receipt', h('img', { src: signed[r.proof_path], alt: 'receipt', style: { width: '100%' } })) })
           : h('span.muted', '—')),
@@ -721,7 +750,7 @@ async function tabPayments(main) {
         h('td', h('span.badge', { class: r.status }, r.status)),
         h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
           r.status !== 'approved' ? h('button.btn.ok.sm', { onclick: () => review([r.id], 'approved') }, 'Approve') : null,
-          r.status !== 'rejected' ? h('button.btn.sm', { onclick: () => review([r.id], 'rejected') }, 'Reject') : null))))))) :
+          r.status !== 'rejected' ? h('button.btn.sm', { onclick: () => review([r.id], 'rejected') }, 'Reject') : null)))))) :
       h('div.card', h('p.muted', `No ${filter === 'all' ? '' : filter + ' '}payments.`)));
 
   main.querySelector('header select').addEventListener('change', (e) => { localStorage.setItem('pay_filter', e.target.value); renderTab(); });
@@ -729,13 +758,31 @@ async function tabPayments(main) {
 
 const stat = (value, label) => h('div.stat', h('b', value), h('span', label));
 
+// Big tables render PAGE rows at a time, with a "Show more" row at the end.
+const PAGE = 200;
+function pagedBody(items, row) {
+  const body = h('tbody');
+  const more = (from) => {
+    body.append(...items.slice(from, from + PAGE).map(row));
+    if (from + PAGE < items.length) {
+      const cols = body.firstElementChild?.children.length || 1;
+      const tr = h('tr', h('td', { colSpan: cols, style: { textAlign: 'center' } },
+        h('button.btn.sm', { type: 'button', onclick: () => { tr.remove(); more(from + PAGE); } },
+          `Show more (${items.length - from - PAGE} left)`)));
+      body.append(tr);
+    }
+  };
+  more(0);
+  return body;
+}
+
 // ---------------------------------------------------------------------
 // Tab: Votes & voters
 // ---------------------------------------------------------------------
 async function tabVotes(main) {
   const [votes, voters, attempts] = await Promise.all([
-    fetchAll(() => sb.from('votes').select('*, contestants(name,number)').eq('event_id', ev.id).order('created_at', { ascending: false })),
-    fetchAll(() => sb.from('voters').select('*').eq('event_id', ev.id).order('created_at', { ascending: false })),
+    fetchAll(() => sb.from('votes').select('*, contestants(name,number)').eq('event_id', ev.id).order('created_at', { ascending: false }).order('id')),
+    fetchAll(() => sb.from('voters').select('*').eq('event_id', ev.id).order('created_at', { ascending: false }).order('id')),
     sb.from('vote_attempts').select('*').eq('event_id', ev.id).order('created_at', { ascending: false }).limit(300).then((r) => r.data || []),
   ]);
   const view = localStorage.getItem('votes_view') || 'voters';
@@ -756,7 +803,9 @@ async function tabVotes(main) {
   const search = h('input', { type: 'search', placeholder: 'Search name, email, IP, contestant…', 'aria-label': 'Search voters and votes', style: { maxWidth: '320px' } });
   const tableBox = h('div');
 
-  const voterVotes = (id) => votes.filter((x) => x.voter_id === id && x.status !== 'rejected');
+  const votesByVoter = {};
+  for (const x of votes) if (x.status !== 'rejected') (votesByVoter[x.voter_id] ||= []).push(x);
+  const voterVotes = (id) => votesByVoter[id] || [];
   const setBlocked = async (v, blocked) => {
     const { error } = await sb.from('voters').update({ blocked }).eq('id', v.id);
     if (error) return toast(error.message, 'error');
@@ -771,7 +820,7 @@ async function tabVotes(main) {
       const list = voters.filter((v) => match(v.name, v.email, v.phone, v.extra, v.ip, v.device_info?.browser, v.device_info?.os, v.fingerprint));
       fill(tableBox, list.length ? h('div.table-wrap', h('table',
         h('thead', h('tr', ['Voter', 'Device', 'Network', 'Votes', 'Flags', ''].map((t) => h('th', t)))),
-        h('tbody', list.map((v) => {
+        pagedBody(list, (v) => {
           const f = flags(v);
           const vv = voterVotes(v.id);
           return h('tr', { style: v.blocked ? { opacity: 0.55 } : {} },
@@ -782,16 +831,16 @@ async function tabVotes(main) {
               h('div.mono.muted', { title: v.fingerprint }, `fp ${String(v.fingerprint).slice(0, 10)}…`)),
             h('td.small.mono', v.ip || '—'),
             h('td.small', vv.map((x) => `${x.contestants?.name || '?'}${x.quantity > 1 ? ' ×' + x.quantity : ''}${x.status === 'pending' ? ' (pending)' : ''}`).join(', ') || '—'),
-            h('td.small', f.length ? f.map((t) => h('div', { style: { color: 'var(--warn)' } }, '⚠ ' + t)) : h('span.muted', '—')),
+            h('td.small', f.length ? f.map((t) => h('div', { style: { color: 'var(--warn-ink)' } }, '⚠ ' + t)) : h('span.muted', '—')),
             h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
               h('button.btn.sm', { onclick: () => showDevice(v) }, 'Details'),
               h('button.btn.sm', { class: v.blocked ? '' : 'danger', onclick: () => setBlocked(v, !v.blocked) }, v.blocked ? 'Unblock' : 'Block'))));
-        })))) : h('div.card', h('p.muted', 'No voters yet.')));
+        }))) : h('div.card', h('p.muted', q ? 'No matches.' : 'No voters yet.')));
     } else if (view === 'votes') {
       const list = votes.filter((x) => { const v = voterById[x.voter_id] || {}; return match(v.name, v.email, x.ip, x.contestants?.name, x.status); });
       fill(tableBox, list.length ? h('div.table-wrap', h('table',
         h('thead', h('tr', ['Time', 'Voter', 'Contestant', 'Qty', ev.voting_mode === 'criteria' ? 'Scores' : null, 'Status', ''].filter(Boolean).map((t) => h('th', t)))),
-        h('tbody', list.map((x) => h('tr',
+        pagedBody(list, (x) => h('tr',
           h('td.small', new Date(x.created_at).toLocaleString()),
           h('td', voterById[x.voter_id]?.name || '—', h('div.muted.small.mono', x.ip || '')),
           h('td', x.contestants?.name || '—'),
@@ -802,21 +851,22 @@ async function tabVotes(main) {
             if (!(await confirmBox('Delete vote?', 'Remove this vote permanently?', 'Delete', true))) return;
             const { error } = await sb.from('votes').delete().eq('id', x.id);
             if (error) toast(error.message, 'error'); else renderTab();
-          }, 'aria-label': 'Delete this vote' }, icon('trash-2', 16)))))))) : h('div.card', h('p.muted', 'No votes yet.')));
+          }, 'aria-label': 'Delete this vote' }, icon('trash-2', 16))))))) : h('div.card', h('p.muted', q ? 'No matches.' : 'No votes yet.')));
     } else {
       const list = attempts.filter((a) => match(a.name, a.ip, a.code));
       fill(tableBox, list.length ? h('div.table-wrap', h('table',
         h('thead', h('tr', ['Time', 'Reason', 'Name', 'IP', 'Device'].map((t) => h('th', t)))),
-        h('tbody', list.map((a) => h('tr',
+        pagedBody(list, (a) => h('tr',
           h('td.small', new Date(a.created_at).toLocaleString()),
           h('td', h('span.badge.closed', a.code)),
           h('td', a.name || '—'),
           h('td.small.mono', a.ip || '—'),
-          h('td.small.mono', { title: a.user_agent }, `fp ${String(a.fingerprint || '').slice(0, 10)}…`)))))) :
-        h('div.card', h('p.muted', 'No blocked attempts.')));
+          h('td.small.mono', { title: a.user_agent }, `fp ${String(a.fingerprint || '').slice(0, 10)}…`))))) :
+        h('div.card', h('p.muted', q ? 'No matches.' : 'No blocked attempts.')));
     }
   };
-  search.addEventListener('input', draw);
+  let searchTimer;
+  search.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(draw, 150); });
 
   const approved = votes.filter((v) => v.status === 'approved').reduce((s, v) => s + v.quantity, 0);
   fill(main,
@@ -997,7 +1047,7 @@ async function tabScreenshot(main) {
     tableBox);
 
   await load();
-  refreshTimer = setInterval(load, 15000);
+  poll(main, load, 15000);
 }
 
 main().catch((e) => {

@@ -261,19 +261,25 @@ drop function if exists public._matching_voters(public.events, text, text, text,
 create or replace function public._matching_voters(
   e public.events, p_fp text, p_tok text, p_ip text, p_name_norm text, p_email text, p_phone text, p_cross text)
 returns uuid[] language sql stable security definer set search_path = public as $$
-  select coalesce(array_agg(v.id), '{}')
-  from public.voters v
-  where v.event_id = e.id and (
-       (p_tok <> '' and v.device_token = p_tok)  -- same browser is always the same voter
-    or (e.limit_by_fingerprint and p_fp <> '' and v.fingerprint = p_fp)
+  -- One indexed lookup per rule (an OR across all rules would scan every voter).
+  select coalesce(array_agg(distinct id), '{}') from (
+    -- same browser is always the same voter
+    select id from public.voters where p_tok <> '' and event_id = e.id and device_token = p_tok
+    union all
+    select id from public.voters where e.limit_by_fingerprint and p_fp <> '' and event_id = e.id and fingerprint = p_fp
+    union all
     -- same computer, different browser: identical hardware traits on the same network
-    or (e.limit_by_cross_browser and p_cross <> '' and p_ip <> ''
-        and v.cross_id = p_cross and public._ip_net(v.ip) = public._ip_net(p_ip))
-    or (e.limit_by_ip and p_ip <> '' and v.ip = p_ip)
-    or (e.limit_by_name and p_name_norm <> '' and v.name_norm = p_name_norm)
-    or (e.limit_by_contact and p_email <> '' and v.email = p_email)
-    or (e.limit_by_contact and p_phone <> '' and v.phone = p_phone)
-  );
+    select id from public.voters where e.limit_by_cross_browser and p_cross <> '' and p_ip <> ''
+      and event_id = e.id and cross_id = p_cross and public._ip_net(ip) = public._ip_net(p_ip)
+    union all
+    select id from public.voters where e.limit_by_ip and p_ip <> '' and event_id = e.id and ip = p_ip
+    union all
+    select id from public.voters where e.limit_by_name and p_name_norm <> '' and event_id = e.id and name_norm = p_name_norm
+    union all
+    select id from public.voters where e.limit_by_contact and p_email <> '' and event_id = e.id and email = p_email
+    union all
+    select id from public.voters where e.limit_by_contact and p_phone <> '' and event_id = e.id and phone = p_phone
+  ) m;
 $$;
 
 -- ---------------------------------------------------------------------
@@ -510,32 +516,57 @@ begin
   select nullif(sum(weight), 0) into v_total from public.criteria where event_id = e.id;
 
   return query
-  with per_vote as (
-    select v.id, v.contestant_id, v.voter_id, v.quantity, v.status,
-           (select sum((s.value)::numeric * cr.weight)
-              from jsonb_each_text(coalesce(v.scores, '{}'::jsonb)) s
-              join public.criteria cr on cr.id::text = s.key and cr.event_id = e.id) / v_total
-             / e.score_max * 100 as pct
-      from public.votes v where v.event_id = e.id and v.status <> 'rejected'
+  with counts as (
+    select v.contestant_id,
+           sum(v.quantity) filter (where v.status = 'approved') as approved,
+           sum(v.quantity) filter (where v.status = 'pending')  as pending
+      from public.votes v
+     where v.event_id = e.id and v.status <> 'rejected'
+     group by v.contestant_id
   ),
-  per_criterion as (
-    select v.contestant_id, s.key as criterion_id,
-           round(sum((s.value)::numeric * v.quantity) / nullif(sum(v.quantity), 0), 2) as avg
-      from public.votes v, jsonb_each_text(coalesce(v.scores, '{}'::jsonb)) s
-     where v.event_id = e.id and v.status = 'approved'
-     group by v.contestant_id, s.key
+  -- distinct voters via a hashed DISTINCT (much faster than count(distinct) sorting)
+  voter_counts as (
+    select x.contestant_id, count(*) as voters
+      from (select distinct v.contestant_id, v.voter_id from public.votes v
+             where v.event_id = e.id and v.status = 'approved') x
+     group by x.contestant_id
+  ),
+  -- Ratings are only read for events that use them, against an in-memory
+  -- weight list (not a criteria lookup per vote).
+  weights as materialized (
+    select cr.id::text as key, cr.weight from public.criteria cr where cr.event_id = e.id
+  ),
+  rated as (
+    select v.id, v.contestant_id, v.quantity, s.key, (s.value)::numeric as val, w.weight
+      from public.votes v
+      cross join lateral jsonb_each_text(v.scores) s
+      join weights w on w.key = s.key
+     where e.voting_mode = 'criteria' and v.event_id = e.id and v.status = 'approved' and v.scores is not null
+  ),
+  per_vote as (
+    select r.contestant_id, max(r.quantity) as q, sum(r.val * r.weight) as weighted
+      from rated r group by r.id, r.contestant_id
+  ),
+  score as (
+    select pv.contestant_id,
+           round(sum(pv.q * pv.weighted) / v_total / e.score_max * 100 / nullif(sum(pv.q), 0), 2) as score
+      from per_vote pv group by pv.contestant_id
+  ),
+  breakdown as (
+    select b.contestant_id, jsonb_object_agg(b.key, b.avg) as breakdown
+      from (select r.contestant_id, r.key, round(sum(r.val * r.quantity) / nullif(sum(r.quantity), 0), 2) as avg
+              from rated r group by r.contestant_id, r.key) b
+     group by b.contestant_id
   )
   select c.id, c.number, c.name, c.photo_url, c.sort_order,
-         coalesce(sum(pv.quantity) filter (where pv.status = 'approved'), 0)::bigint,
-         coalesce(sum(pv.quantity) filter (where pv.status = 'pending'), 0)::bigint,
-         count(distinct pv.voter_id) filter (where pv.status = 'approved')::bigint,
-         round(sum(pv.pct * pv.quantity) filter (where pv.status = 'approved')
-               / nullif(sum(pv.quantity) filter (where pv.status = 'approved' and pv.pct is not null), 0), 2),
-         (select jsonb_object_agg(pc.criterion_id, pc.avg) from per_criterion pc where pc.contestant_id = c.id)
+         coalesce(ct.approved, 0)::bigint, coalesce(ct.pending, 0)::bigint, coalesce(vc.voters, 0)::bigint,
+         sc.score, bd.breakdown
     from public.contestants c
-    left join per_vote pv on pv.contestant_id = c.id
+    left join counts ct on ct.contestant_id = c.id
+    left join voter_counts vc on vc.contestant_id = c.id
+    left join score sc on sc.contestant_id = c.id
+    left join breakdown bd on bd.contestant_id = c.id
    where c.event_id = e.id and c.active
-   group by c.id
    order by c.sort_order, c.created_at;
 end;
 $$;

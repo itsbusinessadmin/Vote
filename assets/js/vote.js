@@ -7,6 +7,8 @@ const app = $('#app');
 const ID_KEY = 'vote_identity';
 
 let event, contestants = [], criteria = [], myStatus = null, device;
+// Start the device check right away; it runs while the event data downloads.
+const devicePromise = getDevice().then((d) => (device = d));
 
 function savedIdentity() {
   try { return JSON.parse(localStorage.getItem(ID_KEY)) || {}; } catch { return {}; }
@@ -16,32 +18,46 @@ function saveIdentity(id) {
 }
 const voterPayload = (identity = savedIdentity()) => ({ ...identity, ...device });
 
+const bySortOrder = (a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at);
+
 async function main() {
   if (!configured) return notConfigured(app);
   const slug = new URLSearchParams(location.search).get('e');
-  device = await getDevice();
   if (!slug) return renderEventList();
 
-  const { data, error } = await sb.from('events').select('*').eq('slug', slug).maybeSingle();
+  // Event, contestants and criteria in a single request.
+  const { data, error } = await sb.from('events').select('*, contestants(*), criteria(*)').eq('slug', slug).maybeSingle();
   if (error || !data) {
     fill(app, h('div.center-card', h('h2', 'Event not found'), h('p.muted', 'Check the link you were given.')));
     return;
   }
-  event = data;
-  const [c, k] = await Promise.all([
-    sb.from('contestants').select('*').eq('event_id', event.id).eq('active', true).order('sort_order').order('created_at'),
-    sb.from('criteria').select('*').eq('event_id', event.id).order('sort_order').order('created_at'),
-  ]);
-  contestants = c.data || [];
-  criteria = k.data || [];
+  ({ contestants, criteria, ...event } = data);
+  contestants = contestants.filter((c) => c.active).sort(bySortOrder);
+  criteria = criteria.sort(bySortOrder);
   document.title = event.title;
   setTheme(event.theme_color);
   if (event.logo_url) document.head.append(h('link', { rel: 'icon', href: event.logo_url }));
+
+  // Show the page now; this device's votes fill in a moment later.
+  render();
+  await devicePromise;
   await refreshStatus();
   render();
+  scheduleWindowChanges();
+
   if (event.show_live_results) {
     loadResults();
-    setInterval(loadResults, 10000);
+    // Poll every 15 s, and not at all while the tab is hidden.
+    setInterval(() => { if (!document.hidden) loadResults(); }, 15000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadResults(); });
+  }
+}
+
+// Re-render when voting opens or closes while the page is open.
+function scheduleWindowChanges() {
+  for (const t of [event.starts_at, event.ends_at]) {
+    const ms = t ? Date.parse(t) - Date.now() : -1;
+    if (ms > 0 && ms < 2 ** 31 - 1) setTimeout(render, ms + 500);
   }
 }
 
@@ -64,14 +80,14 @@ async function renderEventList() {
 
 async function refreshStatus() {
   const { data } = await sb.rpc('my_vote_status', { p_event_id: event.id, p_voter: voterPayload() });
-  myStatus = data;
+  if (data) myStatus = data;
 }
 
 function votingState() {
   const now = Date.now();
-  if (event.status !== 'open' || (event.ends_at && now > Date.parse(event.ends_at))) return { open: false, text: 'Voting is closed' };
+  if (event.status !== 'open' || (event.ends_at && now > Date.parse(event.ends_at))) return { open: false, text: 'Voting is closed', button: 'Voting closed' };
   if (event.starts_at && now < Date.parse(event.starts_at)) {
-    return { open: false, text: `Voting opens ${new Date(event.starts_at).toLocaleString()}` };
+    return { open: false, text: `Voting opens ${new Date(event.starts_at).toLocaleString()}`, button: 'Not open yet' };
   }
   return { open: true };
 }
@@ -99,7 +115,7 @@ function render() {
       h('h2.card-title', 'How to vote'),
       event.description ? h('p.small', event.description) : null,
       h('ul.rules.small', rulesList(event).map((t) => h('li', t))),
-      myStatus?.blocked ? h('p.small', { style: { color: 'var(--bad)', fontWeight: 700 } }, 'This device has been blocked by the organizer.') :
+      myStatus?.blocked ? h('p.small', { style: { color: 'var(--bad-ink)', fontWeight: 700 } }, 'This device has been blocked by the organizer.') :
       remaining != null ? h('p', h('b', `You have ${remaining} vote${remaining === 1 ? '' : 's'} left.`)) : null),
     criteria.length ? h('div.card',
       h('h2.card-title', 'Judging criteria'),
@@ -107,13 +123,16 @@ function render() {
         h('b', c.name), h('span.pct', { 'aria-label': `${Number(c.weight)} percent` }, `${Number(c.weight)}%`),
         c.description ? h('p', c.description) : null)))) : null);
 
-  const grid = h('div.contestants', contestants.map((c) => {
+  const grid = h('div.contestants', contestants.map((c, i) => {
     const v = votedInfo(c.id);
     const canVote = state.open && !myStatus?.blocked && (remaining == null || remaining > 0) &&
       (event.allow_repeat_contestant || !v);
     return h('article.contestant',
-      h('div.photo', c.photo_url ? { role: 'img', 'aria-label': `Photo of ${c.name}`, style: { backgroundImage: `url("${c.photo_url}")` } } : {},
-        c.photo_url ? null : h('div.initials', { 'aria-hidden': 'true' }, initials(c.name)),
+      h('div.photo',
+        c.photo_url
+          // Lazy-load photos below the fold; the first few load right away.
+          ? h('img', { src: c.photo_url, alt: `Photo of ${c.name}`, width: 400, height: 500, decoding: 'async', loading: i < 4 ? 'eager' : 'lazy' })
+          : h('div.initials', { 'aria-hidden': 'true' }, initials(c.name)),
         c.number ? h('span.no', `#${c.number}`) : null,
         v ? h('span.voted', { class: v.status === 'pending' ? 'pending' : '' },
           v.status === 'pending' ? [icon('clock', 14), `${v.quantity} pending`] : [icon('check', 14), `Voted${v.quantity > 1 ? ` ×${v.quantity}` : ''}`]) : null),
@@ -121,7 +140,7 @@ function render() {
         h('h3', c.name),
         c.description ? h('div.desc', c.description) : h('div.desc'),
         h('button.btn.primary.block', { type: 'button', disabled: !canVote, onclick: () => openVote(c), 'aria-label': canVote ? `Vote for ${c.name}` : null },
-          !state.open ? 'Voting closed' : v && !event.allow_repeat_contestant ? [icon('check'), 'Voted'] : 'Vote')));
+          !state.open ? state.button : v && !event.allow_repeat_contestant ? [icon('check'), 'Voted'] : 'Vote')));
   }));
 
   fill(app, hero, h('main.wrap',
@@ -133,11 +152,14 @@ function render() {
   h('footer.footer', 'Votes are protected against duplicates and spam.'));
 }
 
+let resultsBusy = false;
 async function loadResults() {
-  const box = $('#results');
-  if (!box) return;
-  const { data } = await sb.rpc('get_results', { p_event_id: event.id });
-  if (!data) return;
+  if (!$('#results') || resultsBusy) return;
+  resultsBusy = true;
+  let data;
+  try { ({ data } = await sb.rpc('get_results', { p_event_id: event.id })); } finally { resultsBusy = false; }
+  const box = $('#results'); // re-read: the page may have re-rendered meanwhile
+  if (!data || !box) return;
   fill(box, data.length ? standingsList(data, event, { showCounts: event.show_vote_counts }) : h('p.muted', 'No votes yet.'));
 }
 
@@ -230,6 +252,7 @@ function openVote(c) {
         return false;
       }
       saveIdentity({ ...savedIdentity(), ...identity });
+      await devicePromise;
 
       let proofPath = null;
       if (paid && proofFile) {
@@ -240,7 +263,7 @@ function openVote(c) {
         p_event_id: event.id,
         p_contestant_id: c.id,
         p_voter: voterPayload(identity),
-        p_quantity: paid ? Number(qty.value) || 1 : 1,
+        p_quantity: paid ? Math.max(1, Math.floor(Number(qty.value)) || 1) : 1,
         p_scores: event.voting_mode === 'criteria' ? scores : null,
         p_payment_ref: paid ? ref.value.trim() : null,
         p_proof_path: proofPath,
