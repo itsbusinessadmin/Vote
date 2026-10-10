@@ -222,7 +222,7 @@ function renderSide() {
 }
 
 function header(title, ...right) {
-  return h('header',
+  return h('header.page-head',
     h('div.row',
       h('button.btn.sm.menu-toggle', { type: 'button', 'aria-label': 'Open menu', 'aria-controls': 'side',
         onclick: (e) => e.currentTarget.setAttribute('aria-expanded', String($('#side').classList.toggle('open'))) }, icon('menu', 20)),

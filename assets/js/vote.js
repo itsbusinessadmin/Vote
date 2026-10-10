@@ -96,6 +96,8 @@ function votedInfo(contestantId) {
   return myStatus?.votes?.find((v) => v.contestant_id === contestantId);
 }
 
+let heroObserver = null;
+
 function render() {
   const state = votingState();
   const remaining = myStatus?.remaining;
@@ -150,13 +152,23 @@ function render() {
           !state.open ? state.button : v && !event.allow_repeat_contestant ? [icon('check'), 'Voted'] : 'Vote')));
   }));
 
-  fill(app, hero, h('main.wrap',
+  // iOS-style: a compact glass title bar slides in once the big header is gone.
+  const topbar = h('div.topbar', { 'aria-hidden': 'true' },
+    event.logo_url ? h('img', { src: event.logo_url, alt: '' }) : null,
+    h('b', event.title),
+    remaining != null ? h('span.pill', `${remaining} vote${remaining === 1 ? '' : 's'} left`) : null);
+
+  fill(app, topbar, hero, h('main.wrap',
     info,
     h('h2', 'Contestants'),
     contestants.length ? grid : h('p.muted', 'Contestants will appear here soon.'),
     event.show_live_results ? h('section', { style: { marginTop: '2.5rem' } },
       h('h2', 'Live standings'), h('div#results', h('div.spinner', { role: 'status', 'aria-label': 'Loading' }))) : null),
   h('footer.footer', 'Votes are protected against duplicates and spam.'));
+  // Watch the header only once it is on the page.
+  heroObserver?.disconnect();
+  heroObserver = new IntersectionObserver(([e]) => topbar.classList.toggle('show', !e.isIntersecting), { rootMargin: '-40px 0px 0px 0px' });
+  heroObserver.observe(hero);
 }
 
 let resultsBusy = false;
