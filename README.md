@@ -23,7 +23,7 @@ the database, admin login and image storage run on the **Supabase free tier**. T
   - *Voting style*: "Pick a contestant" (criteria shown as a guide), or "Rate each criterion" (1–N sliders, weighted score).
   - *Pricing*: free, or paid per vote. Voters pay you directly (GCash/Maya/bank QR), enter a reference no. and/or upload a receipt, and you approve it.
   - *Limits*: total votes per person, how many different contestants, and whether repeat votes for the same contestant are allowed. One-click presets are included.
-  - *Voter details*: name, email, mobile, and a custom field (e.g. Student ID).
+  - *Voter details*: name, email, mobile, and a custom field (e.g. Student ID). Email can be limited to specific domains (e.g. only `@ces.edu.ph`).
 - **Anti-cheat** (see below), plus a log of every blocked attempt.
 - **Payments**: view receipts, approve or reject individually, approve all, see totals.
 - **Votes & voters**: every voter with device, OS, model, IP and fingerprint. Shared-device, shared-IP, shared-name and incognito voters are flagged. Block or unblock voters, delete votes, export CSV, reset.

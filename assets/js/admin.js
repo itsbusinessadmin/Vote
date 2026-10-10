@@ -529,6 +529,8 @@ async function tabRules(main, draft) {
       h('h2.card-title', 'Voter details to ask for'),
       check(d, 'require_name', 'Name / nickname (required)'),
       check(d, 'ask_email', 'Email address (required)'),
+      field('Allowed email domains (optional)', input(d, 'email_domains', 'text', { placeholder: 'e.g. ces.edu.ph, deped.gov.ph' }),
+        'Only addresses at these domains can vote (subdomains like students.ces.edu.ph also count). Separate several with commas. Leave blank to accept any email.'),
       check(d, 'ask_phone', 'Mobile number (required)'),
       field('Custom field (optional)', input(d, 'extra_field_label', 'text', { placeholder: 'e.g. Student ID, Section, Table no.' }), 'Leave this blank to not ask.')),
     h('div.card.section.stack',
@@ -552,7 +554,7 @@ async function tabRules(main, draft) {
       h('button.btn.primary', { onclick: async () => {
         const keys = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'currency', 'payment_instructions',
           'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
-          'allow_repeat_contestant', 'require_name', 'ask_email', 'ask_phone', 'extra_field_label', 'limit_by_fingerprint', 'limit_by_cross_browser',
+          'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label', 'limit_by_fingerprint', 'limit_by_cross_browser',
           'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots', 'cooldown_seconds', 'show_live_results', 'show_vote_counts'];
         const patch = Object.fromEntries(keys.map((k) => [k, d[k]]));
         for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds']) {
@@ -562,6 +564,7 @@ async function tabRules(main, draft) {
         patch.max_qty_per_vote = Math.max(1, patch.max_qty_per_vote);
         patch.currency = (patch.currency || 'PHP').toUpperCase().slice(0, 3);
         patch.extra_field_label = (patch.extra_field_label || '').trim() || null;
+        patch.email_domains = emailDomains(patch.email_domains).join(', ') || null;
         // keep the QR uploaded from this tab
         patch.payment_qr_url = ev.payment_qr_url;
         if (await saveEvent(patch)) renderTab();
@@ -748,6 +751,11 @@ async function tabVotes(main) {
       h('div.grow'), search),
     tableBox);
   draw();
+}
+
+// "@CES.edu.ph; deped.gov.ph" -> ['ces.edu.ph', 'deped.gov.ph']
+export function emailDomains(text) {
+  return [...new Set(String(text || '').toLowerCase().split(/[\s,;]+/).map((x) => x.replace(/^@+/, '')).filter((x) => x.includes('.')))];
 }
 
 function countBy(list, key) {

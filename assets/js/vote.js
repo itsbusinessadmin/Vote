@@ -167,13 +167,20 @@ function openVote(c) {
 
   const identityFields = [];
   if (event.require_name) identityFields.push(field('name', 'Your name', 'text', 'Full name or nickname', id.name));
-  if (event.ask_email) identityFields.push(field('email', 'Email', 'email', 'you@example.com', id.email));
+  const domains = String(event.email_domains || '').toLowerCase().split(/[\s,;]+/).map((x) => x.replace(/^@+/, '')).filter(Boolean);
+  const domainOk = (email) => !domains.length || domains.some((d) => email.endsWith('@' + d) || email.endsWith('.' + d));
+  if (event.ask_email) {
+    identityFields.push(field('email', 'Email', 'email', domains.length ? `you@${domains[0]}` : 'you@example.com', id.email,
+      domains.length ? `Use your ${domains.map((d) => '@' + d).join(' or ')} email.` : null));
+  }
   if (event.ask_phone) identityFields.push(field('phone', 'Mobile number', 'tel', '09xx xxx xxxx', id.phone));
   if (event.extra_field_label) identityFields.push(field('extra', event.extra_field_label, 'text', '', id.extra));
 
-  function field(key, label, type, placeholder, value) {
-    fields[key] = h('input', { type, placeholder, value: value || '', autocomplete: key === 'extra' ? 'off' : key === 'name' ? 'name' : key === 'phone' ? 'tel' : key });
-    return h('label.field', h('span', label), fields[key]);
+  function field(key, label, type, placeholder, value, hint) {
+    const hintId = hint ? `hint-${key}` : null;
+    fields[key] = h('input', { type, placeholder, value: value || '', 'aria-describedby': hintId,
+      autocomplete: key === 'extra' ? 'off' : key === 'name' ? 'name' : key === 'phone' ? 'tel' : key });
+    return h('label.field', h('span', label), fields[key], hint ? h('small', { id: hintId }, hint) : null);
   }
 
   const scoreRows = event.voting_mode === 'criteria' ? criteria.map((cr) => {
@@ -232,6 +239,10 @@ function openVote(c) {
       Object.values(fields).forEach((el) => fieldError(el, ''));
       if (paid) fieldError(ref, '');
       if (event.require_name && (identity.name || '').length < 2) { fieldError(fields.name, 'Please enter your name.'); return false; }
+      if (event.ask_email && !domainOk((identity.email || '').toLowerCase())) {
+        fieldError(fields.email, `Only ${domains.map((d) => '@' + d).join(', ')} email addresses are accepted.`);
+        return false;
+      }
       saveIdentity({ ...savedIdentity(), ...identity });
 
       let proofPath = null;
@@ -251,7 +262,7 @@ function openVote(c) {
       if (error) { toast(error.message, 'error'); return false; }
       if (!data.ok) {
         // Show field problems next to the field; everything else as a toast.
-        const target = { NAME_REQUIRED: fields.name, EMAIL_REQUIRED: fields.email, PHONE_REQUIRED: fields.phone,
+        const target = { NAME_REQUIRED: fields.name, EMAIL_REQUIRED: fields.email, EMAIL_DOMAIN: fields.email, PHONE_REQUIRED: fields.phone,
           EXTRA_REQUIRED: fields.extra, PAYMENT_REQUIRED: ref, BAD_QUANTITY: qty }[data.code];
         if (target) { fieldError(target, data.message); return false; }
         toast(data.message, 'error');

@@ -66,6 +66,7 @@ create table if not exists public.events (
   -- voter identity fields
   require_name              boolean not null default true,
   ask_email                 boolean not null default false,
+  email_domains             text,  -- e.g. 'ces.edu.ph, deped.gov.ph'; empty = any domain
   ask_phone                 boolean not null default false,
   extra_field_label         text,
 
@@ -131,6 +132,7 @@ create table if not exists public.voters (
 -- Columns added after the first release (no-ops on fresh installs).
 alter table public.events add column if not exists limit_by_cross_browser boolean not null default true;
 alter table public.voters add column if not exists cross_id text;
+alter table public.events add column if not exists email_domains text;
 
 create index if not exists voters_fp_idx    on public.voters (event_id, fingerprint);
 create index if not exists voters_cross_idx on public.voters (event_id, cross_id);
@@ -338,6 +340,16 @@ begin
     v_code := 'NAME_REQUIRED'; v_msg := 'Please enter your name.';
   elsif e.ask_email and v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then
     v_code := 'EMAIL_REQUIRED'; v_msg := 'Please enter a valid email.';
+  elsif e.ask_email and coalesce(trim(e.email_domains), '') <> '' and not exists (
+          -- the exact domain, or a subdomain of it (students.school.edu for school.edu)
+          select 1 from unnest(string_to_array(e.email_domains, ',')) d
+           where trim(both ' @' from lower(d)) <> ''
+             and (split_part(v_email, '@', 2) = trim(both ' @' from lower(d))
+                  or split_part(v_email, '@', 2) like '%.' || trim(both ' @' from lower(d)))) then
+    v_code := 'EMAIL_DOMAIN';
+    v_msg := 'Only these email addresses are accepted: ' || (
+      select string_agg('@' || trim(both ' @' from lower(d)), ', ')
+        from unnest(string_to_array(e.email_domains, ',')) d where trim(both ' @' from d) <> '') || '.';
   elsif e.ask_phone and length(v_phone) < 7 then
     v_code := 'PHONE_REQUIRED'; v_msg := 'Please enter a valid phone number.';
   elsif coalesce(e.extra_field_label, '') <> '' and v_extra = '' then
