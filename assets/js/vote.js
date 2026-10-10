@@ -1,6 +1,7 @@
 import { sb, configured, $, h, fill, icon, fieldError, toast, modal, money, setTheme, notConfigured, uploadImage } from './lib.js';
 import { getDevice } from './device.js';
 import { standingsList, initials } from './standings.js';
+import { rulesList } from './rules.js';
 
 const app = $('#app');
 const ID_KEY = 'vote_identity';
@@ -75,21 +76,6 @@ function votingState() {
   return { open: true };
 }
 
-function rulesList() {
-  const r = [];
-  if (event.pricing === 'paid') {
-    r.push(`${money(event.price_per_vote, event.currency)} per vote. Votes count once the organizer confirms your payment.`);
-  } else r.push('Voting is free.');
-  if (event.max_votes_per_voter > 0) r.push(`Each person can cast ${event.max_votes_per_voter} vote${event.max_votes_per_voter > 1 ? 's' : ''} in total.`);
-  else r.push('There is no limit on the number of votes.');
-  if (event.max_contestants_per_voter > 0) r.push(`You can vote for up to ${event.max_contestants_per_voter} contestant${event.max_contestants_per_voter > 1 ? 's' : ''}.`);
-  r.push(event.allow_repeat_contestant ? 'You can vote for the same contestant more than once.' : 'Only one vote per contestant.');
-  if (event.voting_mode === 'criteria') r.push(`Rate the contestant on each criterion from 1 to ${event.score_max}.`);
-  r.push('Each device can only vote within these limits. Repeat or fake votes are detected and blocked.');
-  if (event.ends_at) r.push(`Voting ends ${new Date(event.ends_at).toLocaleString()}.`);
-  return r;
-}
-
 function votedInfo(contestantId) {
   return myStatus?.votes?.find((v) => v.contestant_id === contestantId);
 }
@@ -112,7 +98,7 @@ function render() {
     h('div.card',
       h('h2.card-title', 'How to vote'),
       event.description ? h('p.small', event.description) : null,
-      h('ul.rules.small', rulesList().map((t) => h('li', t))),
+      h('ul.rules.small', rulesList(event).map((t) => h('li', t))),
       myStatus?.blocked ? h('p.small', { style: { color: 'var(--bad)', fontWeight: 700 } }, 'This device has been blocked by the organizer.') :
       remaining != null ? h('p', h('b', `You have ${remaining} vote${remaining === 1 ? '' : 's'} left.`)) : null),
     criteria.length ? h('div.card',

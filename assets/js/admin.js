@@ -4,6 +4,7 @@ import {
 } from './lib.js';
 import * as config from './config.js';
 import { getDevice } from './device.js';
+import { rulesList } from './rules.js';
 import { standingsList, rankResults, displayName, initials, valueLabel } from './standings.js';
 
 const app = $('#app');
@@ -24,6 +25,8 @@ let ev = null;          // current event
 let tab = localStorage.getItem('admin_tab') || 'event';
 let pendingCount = 0;
 let refreshTimer = null;
+let leaveGuard = null;  // set by tabs with unsaved edits; resolves true if it is OK to leave
+window.addEventListener('beforeunload', (e) => { if (leaveGuard?.dirty?.()) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------------------------------------------------------------------
 // Auth
@@ -191,14 +194,21 @@ function renderSide() {
   fill(side,
     h('div.brand', ev?.logo_url ? h('img', { src: ev.logo_url, alt: '' }) : h('span.brand-icon', icon('vote', 22)), h('span', 'Vote Admin')),
     h('label.field', h('span', 'Event'),
-      h('select', { onchange: (e) => e.target.value === '__new' ? createEvent() : selectEvent(e.target.value) },
+      h('select', { onchange: async (e) => {
+        const value = e.target.value;
+        if (leaveGuard && !(await leaveGuard())) { e.target.value = ev?.id; return; }
+        return value === '__new' ? createEvent() : selectEvent(value);
+      } },
         events.map((e) => h('option', { value: e.id, selected: e.id === ev?.id }, e.title)),
         h('option', { value: '__new' }, '+ New event…'))),
     ev ? h('nav.nav', { 'aria-label': 'Admin sections' }, TABS.map(([id, label, ic]) => h('button', {
       type: 'button',
       class: id === tab ? 'active' : '',
       'aria-current': id === tab ? 'page' : null,
-      onclick: () => { tab = id; localStorage.setItem('admin_tab', id); side.classList.remove('open'); renderSide(); renderTab(); },
+      onclick: async () => {
+        if (id !== tab && leaveGuard && !(await leaveGuard())) return;
+        tab = id; localStorage.setItem('admin_tab', id); side.classList.remove('open'); renderSide(); renderTab();
+      },
     }, h('span.nav-label', icon(ic), label),
       id === 'payments' && pendingCount ? h('span.count', { 'aria-label': `${pendingCount} pending` }, pendingCount) : null))) : null,
     h('div.grow'),
@@ -221,6 +231,7 @@ function header(title, ...right) {
 
 function renderTab() {
   clearInterval(refreshTimer);
+  leaveGuard = null;
   const main = $('#main');
   if (!ev) {
     fill(main, h('div.center-card',
@@ -484,95 +495,174 @@ async function editCriterion(c, order = 0) {
 // ---------------------------------------------------------------------
 // Tab: Voting rules
 // ---------------------------------------------------------------------
+const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'currency', 'payment_instructions',
+  'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
+  'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label',
+  'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots',
+  'cooldown_seconds', 'show_live_results', 'show_vote_counts'];
+
+const LIMIT_PRESETS = [
+  ['One vote only', 'Each person picks one contestant, once.', { max_votes_per_voter: 1, max_contestants_per_voter: 1, allow_repeat_contestant: false }],
+  ['Up to 3 contestants', 'One vote each for up to 3 different contestants.', { max_votes_per_voter: 3, max_contestants_per_voter: 3, allow_repeat_contestant: false }],
+  ['10 votes, spread freely', 'Any mix, including several for the same contestant.', { max_votes_per_voter: 10, max_contestants_per_voter: 0, allow_repeat_contestant: true }],
+  ['Unlimited', 'No cap. Best for paid votes.', { max_votes_per_voter: 0, max_contestants_per_voter: 0, allow_repeat_contestant: true }],
+];
+
+// Radio cards: one choice from a few options, each with a short explanation.
+function choice(obj, key, legend, options) {
+  return h('fieldset.choices',
+    h('legend.sr-only', legend),
+    options.map(([value, title, desc]) => h('label.choice',
+      h('input', { type: 'radio', name: `rule-${key}`, value, checked: String(obj[key]) === String(value),
+        onchange: () => { obj[key] = value; } }),
+      h('div', h('b', title), desc ? h('small', desc) : null))));
+}
+
 async function tabRules(main, draft) {
   const d = draft || { ...ev };
-  const paidBox = h('div.stack');
-  const pricing = select(d, 'pricing', [['free', 'Free voting'], ['paid', 'Paid votes (with payment proof)']]);
-  const showPaid = () => paidBox.classList.toggle('hidden', d.pricing !== 'paid');
-  pricing.addEventListener('change', showPaid);
+  const { count: criteriaCount } = await sb.from('criteria').select('id', { count: 'exact', head: true }).eq('event_id', ev.id);
+  const norm = (v) => (v == null ? '' : String(v));
+  const isDirty = () => RULE_KEYS.some((k) => norm(d[k]) !== norm(ev[k]));
 
-  paidBox.append(
-    h('div.grid-2',
-      field('Price per vote', input(d, 'price_per_vote', 'number', { min: 0, step: 0.01 })),
-      field('Currency', input(d, 'currency', 'text', { maxLength: 3, placeholder: 'PHP' }), 'Three-letter code, e.g. PHP, USD.'),
-      field('Max votes in one purchase', input(d, 'max_qty_per_vote', 'number', { min: 1 }))),
-    field('Payment instructions', input(d, 'payment_instructions', 'textarea', { placeholder: 'Send payment to GCash 09xx-xxx-xxxx (Juan D.). Then enter the reference number below.' })),
-    imageUpload('Payment QR code (optional)', 'payment_qr_url', { hint: 'For example, your GCash / Maya / bank QR.', maxSide: 900 }),
-    check(d, 'require_payment_proof', 'Require a reference number or receipt', 'Voters must enter a reference no. or upload a screenshot.'),
-    h('p.small.muted', 'Paid votes stay "pending" until you approve them in the Payments tab. Only approved votes count.'));
+  // Parts of the form that only apply in some situations.
+  const conditional = [];
+  const when = (cond, ...kids) => { const el = h('div.stack', kids); conditional.push([el, cond]); return el; };
 
-  fill(main,
+  const section = (id, n, title, desc, ...kids) => h('section.card.section.stack.rules-section', { id: `rules-${id}`, 'aria-labelledby': `rules-${id}-h` },
+    h('div.section-head', h('span.step', { 'aria-hidden': 'true' }, n),
+      h('div', h('h2.card-title', { id: `rules-${id}-h` }, title), desc ? h('p.small.muted', desc) : null)),
+    kids);
+
+  const presetRow = h('div.presets');
+  const drawPresets = () => fill(presetRow, LIMIT_PRESETS.map(([title, desc, p]) => {
+    const active = Object.entries(p).every(([k, v]) => norm(d[k]) === norm(v));
+    return h('button.preset', { type: 'button', 'aria-pressed': String(active), onclick: () => {
+      tabRules(main, { ...d, ...p });
+    } }, h('b', title), h('small', desc));
+  }));
+
+  const summary = h('ul.rules.small');
+  const status = h('span.small', { role: 'status' });
+  const saveBtn = h('button.btn.primary', { type: 'button', onclick: save }, 'Save rules');
+  const discardBtn = h('button.btn.ghost', { type: 'button', onclick: () => tabRules(main) }, 'Discard changes');
+
+  const refresh = () => {
+    conditional.forEach(([el, cond]) => el.classList.toggle('hidden', !cond()));
+    fill(summary, rulesList(d).map((t) => h('li', t)));
+    drawPresets();
+    const dirty = isDirty();
+    status.textContent = dirty ? 'You have unsaved changes' : 'All changes saved';
+    status.className = `small ${dirty ? 'unsaved' : 'muted'}`;
+    saveBtn.disabled = !dirty;
+    discardBtn.classList.toggle('hidden', !dirty);
+  };
+
+  const sections = [
+    section('ballot', 1, 'How people vote', 'What a voter does on the voting page.',
+      choice(d, 'voting_mode', 'Voting style', [
+        ['simple', 'Pick a contestant', 'Voters choose who they like. Criteria are shown as a guide.'],
+        ['criteria', 'Rate each criterion', 'Voters score every criterion; your percentages weight the final score.'],
+      ]),
+      when(() => d.voting_mode === 'criteria',
+        field('Highest rating', input(d, 'score_max', 'number', { min: 2, max: 100 }), 'Voters rate from 1 up to this number.'),
+        !criteriaCount ? h('p.small.notice', 'You have no criteria yet. Add them in the Criteria tab, or voters will have nothing to rate.') : null)),
+
+    section('limits', 2, 'How many votes', 'Pick a preset, then fine-tune if needed.',
+      presetRow,
+      h('details.more', { open: !LIMIT_PRESETS.some(([, , p]) => Object.entries(p).every(([k, v]) => norm(d[k]) === norm(v))) },
+        h('summary', 'Fine-tune the limits'),
+        h('div.stack', { style: { marginTop: '.75rem' } },
+          h('div.grid-2',
+            field('Total votes per person', input(d, 'max_votes_per_voter', 'number', { min: 0 }), '0 = unlimited. For paid votes, this counts votes bought.'),
+            field('Different contestants per person', input(d, 'max_contestants_per_voter', 'number', { min: 0 }), '1 = only one contestant. 0 = unlimited.')),
+          check(d, 'allow_repeat_contestant', 'Allow more than one vote for the same contestant')))),
+
+    section('payment', 3, 'Free or paid', null,
+      choice(d, 'pricing', 'Pricing', [
+        ['free', 'Free', 'Votes count immediately.'],
+        ['paid', 'Paid per vote', 'Voters pay you directly; you approve each payment.'],
+      ]),
+      when(() => d.pricing === 'paid',
+        h('div.grid-2',
+          field('Price per vote', input(d, 'price_per_vote', 'number', { min: 0, step: 0.01 })),
+          field('Currency', input(d, 'currency', 'text', { maxLength: 3, placeholder: 'PHP' }), 'Three-letter code, e.g. PHP, USD.'),
+          field('Max votes in one purchase', input(d, 'max_qty_per_vote', 'number', { min: 1 }))),
+        field('Payment instructions', input(d, 'payment_instructions', 'textarea', { placeholder: 'Send payment to GCash 09xx-xxx-xxxx (Juan D.). Then enter the reference number below.' })),
+        imageUpload('Payment QR code (optional)', 'payment_qr_url', { hint: 'For example, your GCash / Maya / bank QR.', maxSide: 900 }),
+        check(d, 'require_payment_proof', 'Require a reference number or receipt', 'Voters must enter a reference no. or upload a screenshot.'),
+        h('p.small.muted', 'Paid votes stay "pending" until you approve them in the Payments tab. Only approved votes count.'))),
+
+    section('details', 4, 'What voters fill in', 'Asked once, before their first vote.',
+      check(d, 'require_name', 'Name or nickname'),
+      check(d, 'ask_email', 'Email address'),
+      when(() => d.ask_email, h('div.indent',
+        field('Allowed email domains (optional)', input(d, 'email_domains', 'text', { placeholder: 'e.g. ces.edu.ph, deped.gov.ph' }),
+          'Only addresses at these domains can vote; subdomains like students.ces.edu.ph also count. Separate with commas. Blank = any email.'))),
+      check(d, 'ask_phone', 'Mobile number'),
+      field('Extra question (optional)', input(d, 'extra_field_label', 'text', { placeholder: 'e.g. Student ID, Section, Table no.' }), 'Leave blank to skip.')),
+
+    section('anticheat', 5, 'Anti-cheat', 'The same browser always counts as the same voter. These add more checks.',
+      h('h3.group-title', 'Recommended'),
+      check(d, 'limit_by_fingerprint', 'Same device, even in incognito',
+        'Recognises a phone or PC after clearing data or in a private window. Identical phone models can occasionally look alike.'),
+      check(d, 'limit_by_cross_browser', 'Same computer, different browser',
+        'Blocks switching Chrome → Edge → Firefox on one device. Turn off for school computer labs with identical PCs.'),
+      check(d, 'block_bots', 'Block automated browsers'),
+      field('Wait between votes (seconds)', input(d, 'cooldown_seconds', 'number', { min: 0 }), 'Slows down spam clicking. 0 = no wait.'),
+      h('h3.group-title', 'Stricter (can block real people)'),
+      when(() => d.ask_email || d.ask_phone,
+        check(d, 'limit_by_contact', 'Same email or mobile number', 'One email / number = one voter.')),
+      check(d, 'limit_by_name', 'Same name', '"Juan Dela Cruz" = "juan delacruz". Two people can share a name.'),
+      check(d, 'limit_by_ip', 'Same internet connection (IP)',
+        'Everyone on one Wi-Fi shares an IP. Only for online voting, never at a live venue.')),
+
+    section('display', 6, 'Results on the voting page', null,
+      check(d, 'show_live_results', 'Show live standings to voters'),
+      when(() => d.show_live_results, h('div.indent',
+        check(d, 'show_vote_counts', 'Show the number of votes', 'Off = only the ranking bars are shown.')))),
+  ];
+
+  const root = h('div.rules-page',
     header('Voting rules'),
-    h('div.card.section.stack',
-      h('h2.card-title', 'How people vote'),
-      h('div.grid-2',
-        field('Voting style', select(d, 'voting_mode', [
-          ['simple', 'Pick a contestant (criteria shown as a guide)'],
-          ['criteria', 'Rate each criterion (weighted score)'],
-        ])),
-        field('Highest rating (criteria style)', input(d, 'score_max', 'number', { min: 2, max: 100 }), 'Voters rate from 1 up to this number.')),
-      field('Pricing', pricing),
-      paidBox),
-    h('div.card.section.stack',
-      h('h2.card-title', 'Vote limits per person'),
-      h('div.grid-2',
-        field('Total votes per person', input(d, 'max_votes_per_voter', 'number', { min: 0 }), '0 = unlimited. For paid events, this counts the number of votes bought.'),
-        field('Different contestants per person', input(d, 'max_contestants_per_voter', 'number', { min: 0 }), '1 = may vote for only one contestant. 0 = unlimited.')),
-      check(d, 'allow_repeat_contestant', 'Allow voting for the same contestant more than once',
-        'Turn this on for "unlimited / paid" style voting. When it is off, each person votes for a contestant only once.'),
-      h('div.small.muted', h('b', 'Presets: '),
-        presetBtn('One vote only', { max_votes_per_voter: 1, max_contestants_per_voter: 1, allow_repeat_contestant: false }),
-        presetBtn('Vote for up to 3 (once each)', { max_votes_per_voter: 3, max_contestants_per_voter: 3, allow_repeat_contestant: false }),
-        presetBtn('10 votes, spread freely', { max_votes_per_voter: 10, max_contestants_per_voter: 0, allow_repeat_contestant: true }),
-        presetBtn('Unlimited paid votes', { pricing: 'paid', max_votes_per_voter: 0, max_contestants_per_voter: 0, allow_repeat_contestant: true }))),
-    h('div.card.section.stack',
-      h('h2.card-title', 'Voter details to ask for'),
-      check(d, 'require_name', 'Name / nickname (required)'),
-      check(d, 'ask_email', 'Email address (required)'),
-      field('Allowed email domains (optional)', input(d, 'email_domains', 'text', { placeholder: 'e.g. ces.edu.ph, deped.gov.ph' }),
-        'Only addresses at these domains can vote (subdomains like students.ces.edu.ph also count). Separate several with commas. Leave blank to accept any email.'),
-      check(d, 'ask_phone', 'Mobile number (required)'),
-      field('Custom field (optional)', input(d, 'extra_field_label', 'text', { placeholder: 'e.g. Student ID, Section, Table no.' }), 'Leave this blank to not ask.')),
-    h('div.card.section.stack',
-      h('h2.card-title', 'Anti-cheat'),
-      h('p.small.muted', 'The same browser is always treated as the same voter. Turn on more checks below to treat other matches as the same person too.'),
-      check(d, 'limit_by_fingerprint', 'Device fingerprint (recommended)',
-        'Recognises the same phone or PC even in incognito mode or after clearing data, using screen, GPU, fonts, canvas and audio signatures. Identical phone models (for example the same iPhone) can sometimes look alike.'),
-      check(d, 'limit_by_cross_browser', 'Same computer, different browser (recommended)',
-        'Blocks switching from Chrome to Edge or Firefox on the same PC or phone. Matches the same screen, CPU, OS and timezone on the same network. Identical computers on one network (for example a school lab) can be treated as one voter.'),
-      check(d, 'limit_by_contact', 'Same email or mobile number', 'One person = one email / number.'),
-      check(d, 'limit_by_name', 'Same name', 'Normalised: "Juan Dela Cruz" = "juan delacruz". Strict; two people can share a name.'),
-      check(d, 'limit_by_ip', 'Same network (IP address)',
-        '⚠️ Everyone on the same Wi-Fi or mobile carrier may share an IP. Only use this for online-only voting, not at a live venue.'),
-      check(d, 'block_bots', 'Block automated / headless browsers'),
-      field('Cooldown between votes (seconds)', input(d, 'cooldown_seconds', 'number', { min: 0 }), 'Slows down spam clicking.')),
-    h('div.card.section.stack',
-      h('h2.card-title', 'Public display'),
-      check(d, 'show_live_results', 'Show live standings on the voting page'),
-      check(d, 'show_vote_counts', 'Show vote counts publicly', 'When this is off, only the ranking bars are shown.')),
-    h('div.row', { style: { marginTop: '1rem' } },
-      h('button.btn.primary', { onclick: async () => {
-        const keys = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'currency', 'payment_instructions',
-          'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
-          'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label', 'limit_by_fingerprint', 'limit_by_cross_browser',
-          'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots', 'cooldown_seconds', 'show_live_results', 'show_vote_counts'];
-        const patch = Object.fromEntries(keys.map((k) => [k, d[k]]));
-        for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds']) {
-          patch[k] = Math.max(0, Number(patch[k]) || 0);
-        }
-        patch.score_max = Math.min(100, Math.max(2, patch.score_max));
-        patch.max_qty_per_vote = Math.max(1, patch.max_qty_per_vote);
-        patch.currency = (patch.currency || 'PHP').toUpperCase().slice(0, 3);
-        patch.extra_field_label = (patch.extra_field_label || '').trim() || null;
-        patch.email_domains = emailDomains(patch.email_domains).join(', ') || null;
-        // keep the QR uploaded from this tab
-        patch.payment_qr_url = ev.payment_qr_url;
-        if (await saveEvent(patch)) renderTab();
-      } }, 'Save rules')));
-  showPaid();
+    h('nav.rules-jump', { 'aria-label': 'Voting rules sections' },
+      [['ballot', 'How people vote'], ['limits', 'How many votes'], ['payment', 'Free or paid'], ['details', 'Voter details'],
+        ['anticheat', 'Anti-cheat'], ['display', 'Results']].map(([id, label], i) =>
+        h('a', { href: `#rules-${id}`, onclick: (e) => { e.preventDefault(); $(`#rules-${id}`).scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, `${i + 1}. ${label}`))),
+    h('div.rules-layout',
+      h('div', sections),
+      h('aside.card.rules-summary', { 'aria-label': 'What voters will see' },
+        h('h2.card-title', 'What voters will see'),
+        h('p.small.muted', 'Shown under "How to vote". Updates as you edit.'),
+        summary)),
+    h('div.savebar', status, h('div.row', discardBtn, saveBtn)));
+  root.addEventListener('input', refresh);
+  root.addEventListener('change', refresh);
+  fill(main, root);
+  refresh();
+  leaveGuard = Object.assign(
+    async () => !isDirty() || confirmBox('Discard unsaved changes?', 'Your changes to the voting rules have not been saved.', 'Discard', true),
+    { dirty: isDirty });
 
-  function presetBtn(label, p) {
-    return h('button.btn.sm.ghost', { style: { margin: '.2rem' }, onclick: () => { tabRules(main, { ...d, ...p }); toast(`Preset applied: ${label}. Click Save to keep it.`); } }, label);
+  async function save() {
+    const price = root.querySelector('#rules-payment input[type=number]');
+    fieldError(price, '');
+    if (d.pricing === 'paid' && !(Number(d.price_per_vote) > 0)) {
+      $('#rules-payment').scrollIntoView({ block: 'start' });
+      fieldError(price, 'Set a price above 0 for paid votes.');
+      return;
+    }
+    const patch = Object.fromEntries(RULE_KEYS.map((k) => [k, d[k]]));
+    for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds']) {
+      patch[k] = Math.max(0, Number(patch[k]) || 0);
+    }
+    patch.score_max = Math.min(100, Math.max(2, patch.score_max));
+    patch.max_qty_per_vote = Math.max(1, patch.max_qty_per_vote);
+    patch.currency = (patch.currency || 'PHP').toUpperCase().slice(0, 3);
+    patch.extra_field_label = (patch.extra_field_label || '').trim() || null;
+    patch.email_domains = emailDomains(patch.email_domains).join(', ') || null;
+    patch.payment_qr_url = ev.payment_qr_url; // uploaded separately from this tab
+    saveBtn.disabled = true;
+    if (await saveEvent(patch)) { leaveGuard = null; renderTab(); } else refresh();
   }
 }
 
