@@ -71,6 +71,7 @@ create table if not exists public.events (
 
   -- anti-cheat
   limit_by_fingerprint      boolean not null default true,
+  limit_by_cross_browser    boolean not null default true,
   limit_by_ip               boolean not null default false,
   limit_by_name             boolean not null default false,
   limit_by_contact          boolean not null default true,
@@ -118,6 +119,7 @@ create table if not exists public.voters (
   phone         text,
   extra         text,
   fingerprint   text,
+  cross_id      text,
   device_token  text,
   ip            text,
   user_agent    text,
@@ -126,7 +128,12 @@ create table if not exists public.voters (
   created_at    timestamptz not null default now(),
   last_seen_at  timestamptz not null default now()
 );
+-- Columns added after the first release (no-ops on fresh installs).
+alter table public.events add column if not exists limit_by_cross_browser boolean not null default true;
+alter table public.voters add column if not exists cross_id text;
+
 create index if not exists voters_fp_idx    on public.voters (event_id, fingerprint);
+create index if not exists voters_cross_idx on public.voters (event_id, cross_id);
 create index if not exists voters_tok_idx   on public.voters (event_id, device_token);
 create index if not exists voters_ip_idx    on public.voters (event_id, ip);
 create index if not exists voters_name_idx  on public.voters (event_id, name_norm);
@@ -237,16 +244,29 @@ returns text language sql immutable as $$
   select right(regexp_replace(coalesce(t, ''), '[^0-9]+', '', 'g'), 10);
 $$;
 
+-- The household/office network an address belongs to. IPv6 devices rotate
+-- their last 64 bits for privacy, so compare the /64 prefix only.
+create or replace function public._ip_net(ip text)
+returns text language sql immutable as $$
+  select case when coalesce(ip, '') like '%:%'
+              then array_to_string((string_to_array(ip, ':'))[1:4], ':')
+              else coalesce(ip, '') end;
+$$;
+
 -- All voter rows in this event that count as "the same person" under the
 -- event's anti-cheat rules.
+drop function if exists public._matching_voters(public.events, text, text, text, text, text, text);
 create or replace function public._matching_voters(
-  e public.events, p_fp text, p_tok text, p_ip text, p_name_norm text, p_email text, p_phone text)
+  e public.events, p_fp text, p_tok text, p_ip text, p_name_norm text, p_email text, p_phone text, p_cross text)
 returns uuid[] language sql stable security definer set search_path = public as $$
   select coalesce(array_agg(v.id), '{}')
   from public.voters v
   where v.event_id = e.id and (
        (p_tok <> '' and v.device_token = p_tok)  -- same browser is always the same voter
     or (e.limit_by_fingerprint and p_fp <> '' and v.fingerprint = p_fp)
+    -- same computer, different browser: identical hardware traits on the same network
+    or (e.limit_by_cross_browser and p_cross <> '' and p_ip <> ''
+        and v.cross_id = p_cross and public._ip_net(v.ip) = public._ip_net(p_ip))
     or (e.limit_by_ip and p_ip <> '' and v.ip = p_ip)
     or (e.limit_by_name and p_name_norm <> '' and v.name_norm = p_name_norm)
     or (e.limit_by_contact and p_email <> '' and v.email = p_email)
@@ -273,6 +293,7 @@ declare
   e          public.events;
   v_ip       text := public._client_ip();
   v_fp       text := left(coalesce(p_voter ->> 'fingerprint', ''), 128);
+  v_cross    text := left(coalesce(p_voter ->> 'cross_id', ''), 128);
   v_tok      text := left(coalesce(p_voter ->> 'device_token', ''), 128);
   v_name     text := left(trim(coalesce(p_voter ->> 'name', '')), 80);
   v_norm     text;
@@ -309,7 +330,7 @@ begin
     v_code := 'NOT_STARTED'; v_msg := 'Voting has not started yet.';
   elsif not exists (select 1 from public.contestants where id = p_contestant_id and event_id = e.id and active) then
     v_code := 'BAD_CONTESTANT'; v_msg := 'That contestant is not available.';
-  elsif length(v_fp) < 16 or length(v_tok) < 16 then
+  elsif length(v_fp) < 16 or length(v_tok) < 16 or length(v_cross) < 16 then
     v_code := 'NO_DEVICE'; v_msg := 'Your browser could not be verified. Please enable JavaScript and storage, then reload.';
   elsif e.block_bots and coalesce((p_voter ->> 'webdriver')::boolean, false) then
     v_code := 'BOT'; v_msg := 'Automated browsers are not allowed to vote.';
@@ -351,7 +372,7 @@ begin
 
   -- Anti-cheat limits
   if v_code is null then
-    v_ids := public._matching_voters(e, v_fp, v_tok, v_ip, v_norm, v_email, v_phone);
+    v_ids := public._matching_voters(e, v_fp, v_tok, v_ip, v_norm, v_email, v_phone, v_cross);
 
     if exists (select 1 from public.voters where id = any (v_ids) and blocked) then
       v_code := 'BLOCKED'; v_msg := 'This device or voter has been blocked by the organizer.';
@@ -390,15 +411,16 @@ begin
    order by created_at limit 1;
 
   if v_voter_id is null then
-    insert into public.voters (event_id, name, name_norm, email, phone, extra, fingerprint, device_token, ip, user_agent, device_info)
+    insert into public.voters (event_id, name, name_norm, email, phone, extra, fingerprint, cross_id, device_token, ip, user_agent, device_info)
     values (e.id, nullif(v_name, ''), nullif(v_norm, ''), nullif(v_email, ''), nullif(v_phone, ''), nullif(v_extra, ''),
-            v_fp, v_tok, v_ip, v_ua, p_voter -> 'device_info')
+            v_fp, nullif(v_cross, ''), v_tok, v_ip, v_ua, p_voter -> 'device_info')
     returning id into v_voter_id;
   else
     update public.voters set
       name = coalesce(nullif(v_name, ''), name), name_norm = coalesce(nullif(v_norm, ''), name_norm),
       email = coalesce(nullif(v_email, ''), email), phone = coalesce(nullif(v_phone, ''), phone),
-      extra = coalesce(nullif(v_extra, ''), extra), ip = v_ip, fingerprint = v_fp, last_seen_at = now()
+      extra = coalesce(nullif(v_extra, ''), extra), ip = v_ip, fingerprint = v_fp,
+      cross_id = coalesce(nullif(v_cross, ''), cross_id), last_seen_at = now()
     where id = v_voter_id;
   end if;
 
@@ -435,7 +457,8 @@ begin
     public._client_ip(),
     public._norm(p_voter ->> 'name'),
     left(lower(trim(coalesce(p_voter ->> 'email', ''))), 120),
-    public._norm_phone(p_voter ->> 'phone'));
+    public._norm_phone(p_voter ->> 'phone'),
+    left(coalesce(p_voter ->> 'cross_id', ''), 128));
 
   select coalesce(sum(quantity), 0) into v_used
     from public.votes where voter_id = any (v_ids) and status <> 'rejected';
@@ -519,7 +542,7 @@ end;
 $$;
 
 -- Function permissions
-revoke all on function public._matching_voters(public.events, text, text, text, text, text, text) from public, anon, authenticated;
+revoke all on function public._matching_voters(public.events, text, text, text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.cast_vote(uuid, uuid, jsonb, int, jsonb, text, text) to anon, authenticated;
 grant execute on function public.my_vote_status(uuid, jsonb) to anon, authenticated;
 grant execute on function public.get_results(uuid) to anon, authenticated;

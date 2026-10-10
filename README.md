@@ -43,6 +43,7 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 |---|---|---|
 | Browser token (always on) | Same browser voting again | Saved in localStorage, a cookie and IndexedDB. Clearing one store restores it from the others. |
 | **Device fingerprint** | Incognito/private windows, clearing data, a second browser on the same device | Hash of GPU, screen, CPU cores, fonts, canvas, audio, timezone and language. |
+| **Same computer, other browser** | Switching Chrome → Edge → Firefox on one PC or phone | Matches the same OS, screen, CPU cores and timezone **on the same network**. Identical PCs on one network (e.g. a school lab) can count as one voter, so turn this off for lab-based voting. |
 | Same email / mobile | One person, many devices | |
 | Same name | Lazy duplicates | Normalized, e.g. "Juan Dela Cruz" = "juan delacruz". |
 | Same IP | Online-only events | **Don't use at a venue**: everyone on the same Wi-Fi shares one IP. |

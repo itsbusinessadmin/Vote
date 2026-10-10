@@ -536,6 +536,8 @@ async function tabRules(main, draft) {
       h('p.small.muted', 'The same browser is always treated as the same voter. Turn on more checks below to treat other matches as the same person too.'),
       check(d, 'limit_by_fingerprint', 'Device fingerprint (recommended)',
         'Recognises the same phone or PC even in incognito mode or after clearing data, using screen, GPU, fonts, canvas and audio signatures. Identical phone models (for example the same iPhone) can sometimes look alike.'),
+      check(d, 'limit_by_cross_browser', 'Same computer, different browser (recommended)',
+        'Blocks switching from Chrome to Edge or Firefox on the same PC or phone. Matches the same screen, CPU, OS and timezone on the same network. Identical computers on one network (for example a school lab) can be treated as one voter.'),
       check(d, 'limit_by_contact', 'Same email or mobile number', 'One person = one email / number.'),
       check(d, 'limit_by_name', 'Same name', 'Normalised: "Juan Dela Cruz" = "juan delacruz". Strict; two people can share a name.'),
       check(d, 'limit_by_ip', 'Same network (IP address)',
@@ -550,7 +552,7 @@ async function tabRules(main, draft) {
       h('button.btn.primary', { onclick: async () => {
         const keys = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'currency', 'payment_instructions',
           'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
-          'allow_repeat_contestant', 'require_name', 'ask_email', 'ask_phone', 'extra_field_label', 'limit_by_fingerprint',
+          'allow_repeat_contestant', 'require_name', 'ask_email', 'ask_phone', 'extra_field_label', 'limit_by_fingerprint', 'limit_by_cross_browser',
           'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots', 'cooldown_seconds', 'show_live_results', 'show_vote_counts'];
         const patch = Object.fromEntries(keys.map((k) => [k, d[k]]));
         for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds']) {
@@ -648,9 +650,11 @@ async function tabVotes(main) {
   const fpCount = countBy(voters, 'fingerprint');
   const ipCount = countBy(voters, 'ip');
   const nameCount = countBy(voters, 'name_norm');
+  const crossCount = countBy(voters.map((v) => ({ k: v.cross_id && `${v.cross_id}|${v.ip}` })), 'k');
 
   const flags = (v) => [
     fpCount[v.fingerprint] > 1 && `${fpCount[v.fingerprint]} voters share this device fingerprint`,
+    v.cross_id && crossCount[`${v.cross_id}|${v.ip}`] > 1 && `${crossCount[`${v.cross_id}|${v.ip}`]} voters look like the same computer (different browsers)`,
     v.ip && ipCount[v.ip] > 1 && `${ipCount[v.ip]} voters share this IP`,
     v.name_norm && nameCount[v.name_norm] > 1 && `${nameCount[v.name_norm]} voters share this name`,
     v.device_info?.private_mode_guess && 'Probably a private/incognito window',

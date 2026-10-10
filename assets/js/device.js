@@ -155,6 +155,16 @@ async function privateModeGuess() {
   return false;
 }
 
+function osFamily(ua) {
+  if (/Windows/.test(ua)) return 'windows';
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/Mac OS X|Macintosh/.test(ua)) return 'mac';
+  if (/Android/.test(ua)) return 'android';
+  if (/CrOS/.test(ua)) return 'chromeos';
+  if (/Linux/.test(ua)) return 'linux';
+  return 'other';
+}
+
 let cached = null;
 
 export function getDevice() {
@@ -175,8 +185,16 @@ export function getDevice() {
     const fingerprint = await sha256(traits);
     const { browser, os, model, type } = parseUA(ua);
 
+    // "Same computer" id: only traits that every browser on one machine reports
+    // the same way (OS, monitor, usable screen area, CPU cores, timezone, touch).
+    // The server pairs it with the network address, so Chrome, Edge and Firefox
+    // on one PC are recognised as one voter.
+    const crossId = await sha256(['x1', osFamily(ua), screen.width, screen.height, screen.colorDepth,
+      screen.availWidth, screen.availHeight, navigator.hardwareConcurrency, tz, navigator.maxTouchPoints > 0].join('|'));
+
     return {
       fingerprint,
+      cross_id: crossId,
       device_token: token,
       user_agent: ua,
       webdriver: !!navigator.webdriver || /HeadlessChrome|PhantomJS|Puppeteer/i.test(ua),
