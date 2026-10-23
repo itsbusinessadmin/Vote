@@ -19,7 +19,8 @@ export function rulesList(e) {
   r.push(e.allow_repeat_contestant ? 'You can vote for the same contestant more than once.' : 'Only one vote per contestant.');
   const domains = String(e.email_domains || '').split(/[\s,;]+/).map((x) => x.replace(/^@+/, '')).filter(Boolean);
   if (e.ask_email && domains.length) r.push(`Only ${domains.map((d) => '@' + d).join(' or ')} email addresses can vote.`);
-  r.push('Each device can only vote within these limits. Repeat or fake votes are detected and blocked.');
+  r.push('Each device can only vote within these limits, even from a different browser. Repeat or fake votes are detected and blocked.');
+  if (e.block_private) r.push('Private / incognito windows cannot vote.');
   if (e.ends_at) r.push(`Voting ends ${new Date(e.ends_at).toLocaleString()}.`);
   return r;
 }

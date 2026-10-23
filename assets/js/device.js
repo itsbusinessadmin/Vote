@@ -186,11 +186,15 @@ export function getDevice() {
     const { browser, os, model, type } = parseUA(ua);
 
     // "Same computer" id: only traits that every browser on one machine reports
-    // the same way (OS, monitor, usable screen area, CPU cores, timezone, touch).
-    // The server pairs it with the network address, so Chrome, Edge and Firefox
-    // on one PC are recognised as one voter.
-    const crossId = await sha256(['x1', osFamily(ua), screen.width, screen.height, screen.colorDepth,
-      screen.availWidth, screen.availHeight, navigator.hardwareConcurrency, tz, navigator.maxTouchPoints > 0].join('|'));
+    // the same way (OS, screen size, CPU cores, timezone, touch). The server
+    // pairs it with the network, so Chrome, Edge, Firefox and in-app browsers
+    // on one device are recognised as one voter. The usable screen area
+    // (availWidth/Height) and colour depth are left out: browsers disagree on
+    // them (Chrome reports 30-bit on HDR screens, Firefox 24). Cores are capped
+    // at 16 like Firefox does. Width and height are sorted so turning a phone
+    // doesn't change the id.
+    const crossId = await sha256(['x2', osFamily(ua), Math.max(screen.width, screen.height), Math.min(screen.width, screen.height),
+      Math.min(navigator.hardwareConcurrency || 0, 16), tz, navigator.maxTouchPoints > 0].join('|'));
 
     return {
       fingerprint,
