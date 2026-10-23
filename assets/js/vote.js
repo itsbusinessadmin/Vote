@@ -156,35 +156,64 @@ function votedInfo(contestantId) {
 }
 
 let heroObserver = null;
+let view = 'contestants';          // or 'standings' (when live results are on)
+let query = '';                    // contestant search
+const openPanels = new Set();      // "How voting works" etc. stay open across re-renders
+let lastResults = null;
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// iOS-style disclosure row that remembers whether it is open.
+function disclosure(key, title, ...body) {
+  const d = h('details.disclosure', { open: openPanels.has(key) },
+    h('summary', h('span', title), icon('chevron-down', 18)), h('div.disclosure-body', body));
+  d.addEventListener('toggle', () => (d.open ? openPanels.add(key) : openPanels.delete(key)));
+  return d;
+}
 
 function render() {
   const state = votingState();
   const remaining = myStatus?.remaining;
-  const hero = h('header.hero', {
-    class: event.banner_url ? 'has-banner' : '',
-    style: event.banner_url ? { backgroundImage: `url("${event.banner_url}")` } : {},
-  }, h('div.hero-inner',
-    event.logo_url ? h('img.logo', { src: event.logo_url, alt: `${event.title} logo`, width: 96, height: 96 }) : null,
-    h('div.grow',
-      h('h1', event.title),
-      event.subtitle ? h('p', event.subtitle) : null),
-    h('span.badge.on-hero', { class: state.open ? 'open' : 'closed' },
-      state.open ? 'Voting open' : state.text)));
+  if (!event.show_live_results) view = 'contestants';
 
-  const info = h('div.info-bar',
-    h('div.card',
-      h('h2.card-title', 'How to vote'),
-      event.description ? h('p.small', event.description) : null,
-      h('ul.rules.small', rulesList(event).map((t) => h('li', t))),
-      myStatus?.blocked ? h('p.small', { style: { color: 'var(--bad-ink)', fontWeight: 700 } }, 'This device has been blocked by the organizer.') :
-      remaining != null ? h('p', h('b', `You have ${remaining} vote${remaining === 1 ? '' : 's'} left.`)) : null),
-    criteria.length ? h('div.card',
-      h('h2.card-title', 'Judging criteria'),
-      h('div.criteria-list', criteria.map((c) => h('div.criterion',
-        h('b', c.name), h('span.pct', { 'aria-label': `${Number(c.weight)} percent` }, `${Number(c.weight)}%`),
-        c.description ? h('p', c.description) : null)))) : null);
+  // The banner is shown whole, at its own shape (never cropped). When it is
+  // taller than the screen allows, a blurred copy fills the sides.
+  const hero = event.banner_url
+    ? h('header.hero.has-banner',
+      h('img.banner-fill', { src: event.banner_url, alt: '', 'aria-hidden': 'true' }),
+      h('img.banner-img', { src: event.banner_url, alt: '', fetchpriority: 'high' }))
+    : h('header.hero.plain');
 
-  const grid = h('div.contestants', contestants.map((c, i) => {
+  const head = h('section.event-head',
+    h('div.event-card',
+      event.logo_url ? h('img.logo', { src: event.logo_url, alt: `${event.title} logo`, width: 72, height: 72 }) : null,
+      h('div.event-text',
+        h('h1', event.title),
+        event.subtitle ? h('p.subtitle', event.subtitle) : null,
+        h('div.pills',
+          h('span.pill.status', { class: state.open ? 'open' : 'closed' }, h('i', { 'aria-hidden': 'true' }), state.open ? 'Voting open' : state.text),
+          myStatus?.blocked ? h('span.pill.bad', 'This device is blocked')
+            : remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null))));
+
+  const info = h('section.info',
+    event.description ? h('p.lead', event.description) : null,
+    h('div.group',
+      disclosure('rules', 'How voting works', h('ul.rules', rulesList(event).map((t) => h('li', t)))),
+      criteria.length ? disclosure('criteria', `Judging criteria (${criteria.length})`,
+        h('div.criteria-list', criteria.map((c) => h('div.criterion',
+          h('b', c.name), h('span.pct', { 'aria-label': `${Number(c.weight)} percent` }, `${Number(c.weight)}%`),
+          c.description ? h('p', c.description) : null)))) : null));
+
+  const seg = event.show_live_results ? h('div.segmented', { role: 'tablist', 'aria-label': 'Show' },
+    [['contestants', 'Contestants'], ['standings', 'Standings']].map(([k, label]) =>
+      h('button', { type: 'button', role: 'tab', 'aria-selected': String(view === k), onclick: () => {
+        if (view === k) return;
+        view = k; render();
+        if (k === 'standings') loadResults();
+      } }, label))) : null;
+
+  const matches = (c) => !query || `${c.name} ${c.number || ''} ${c.description || ''}`.toLowerCase().includes(query);
+  const cards = contestants.map((c, i) => {
     const v = votedInfo(c.id);
     const canVote = state.open && !myStatus?.blocked && (remaining == null || remaining > 0) &&
       (event.allow_repeat_contestant || !v);
@@ -193,42 +222,58 @@ function render() {
     const photoTag = c.video_url ? 'button.photo.media' : link ? 'a.photo.media' : 'div.photo';
     const photoAttrs = c.video_url ? { type: 'button', onclick: () => playVideo(c, link), 'aria-label': `Play ${c.name}'s video` }
       : link ? { href: link, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${c.name}'s link (opens in a new tab)` } : {};
-    return h('article.contestant',
+    const card = h('article.contestant', { class: v ? 'is-voted' : '', hidden: !matches(c) },
       h(photoTag, photoAttrs,
         c.photo_url
           // Lazy-load photos below the fold; the first few load right away.
           ? h('img', { src: c.photo_url, alt: photoTag === 'div.photo' ? `Photo of ${c.name}` : '', width: 400, height: 500, decoding: 'async', loading: i < 4 ? 'eager' : 'lazy' })
           : h('div.initials', { 'aria-hidden': 'true' }, initials(c.name)),
-        c.video_url ? h('span.media-badge', { 'aria-hidden': 'true' }, h('span.play-circle', icon('play', 28)), h('span', 'Watch'))
-          : link ? h('span.media-badge.link', { 'aria-hidden': 'true' }, icon('external-link', 16), h('span', 'Open link')) : null,
+        c.video_url ? h('span.media-badge', { 'aria-hidden': 'true' }, h('span.play-circle', icon('play', 26)))
+          : link ? h('span.media-badge.link', { 'aria-hidden': 'true' }, icon('external-link', 14), h('span', 'Link')) : null,
         c.number ? h('span.no', `#${c.number}`) : null,
         v ? h('span.voted', { class: v.status === 'pending' ? 'pending' : '' },
-          v.status === 'pending' ? [icon('clock', 14), `${v.quantity} pending`] : [icon('check', 14), `Voted${v.quantity > 1 ? ` ×${v.quantity}` : ''}`]) : null),
+          v.status === 'pending' ? [icon('clock', 13), `${v.quantity} pending`] : [icon('check', 13), `Voted${v.quantity > 1 ? ` ×${v.quantity}` : ''}`]) : null),
       h('div.body',
         h('h3', c.name),
-        c.description ? h('div.desc', c.description) : h('div.desc'),
-        h('button.btn.primary.block', { type: 'button', disabled: !canVote, onclick: () => openVote(c), 'aria-label': canVote ? `Vote for ${c.name}` : null },
-          !state.open ? state.button : v && !event.allow_repeat_contestant ? [icon('check'), 'Voted'] : 'Vote')));
-  }));
+        c.description ? h('p.desc', c.description) : null,
+        h('button.btn.vote', { type: 'button', class: canVote ? 'primary' : '', disabled: !canVote, onclick: () => openVote(c), 'aria-label': canVote ? `Vote for ${c.name}` : null },
+          !state.open ? state.button : v && !event.allow_repeat_contestant ? [icon('check', 16), 'Voted'] : 'Vote')));
+    card._match = () => matches(c);
+    return card;
+  });
+  const empty = h('p.muted.empty', { hidden: cards.some((c) => !c.hidden) || !contestants.length }, 'No contestants match your search.');
+  const search = contestants.length > 6 ? h('label.search',
+    icon('search', 18),
+    h('input', { type: 'search', placeholder: 'Search name or number', value: query, 'aria-label': 'Search contestants', enterKeyHint: 'search',
+      oninput: (e) => {
+        query = e.target.value.trim().toLowerCase();
+        for (const card of cards) card.hidden = !card._match();
+        empty.hidden = cards.some((c) => !c.hidden);
+      } })) : null;
 
-  // iOS-style: a compact glass title bar slides in once the big header is gone.
+  const content = view === 'standings'
+    ? h('section.standings-view', h('div#results',
+      lastResults ? standingsView(lastResults) : h('div.spinner', { role: 'status', 'aria-label': 'Loading' })))
+    : h('section',
+      search,
+      contestants.length ? h('div.contestants', cards) : h('p.muted.empty', 'Contestants will appear here soon.'),
+      empty);
+
+  // iOS-style: a compact glass title bar slides in once the big title is gone.
   const topbar = h('div.topbar', { 'aria-hidden': 'true' },
     event.logo_url ? h('img', { src: event.logo_url, alt: '' }) : null,
     h('b', event.title),
-    remaining != null ? h('span.pill', `${remaining} vote${remaining === 1 ? '' : 's'} left`) : null);
+    remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null);
 
-  fill(app, topbar, hero, h('main.wrap',
-    info,
-    h('h2', 'Contestants'),
-    contestants.length ? grid : h('p.muted', 'Contestants will appear here soon.'),
-    event.show_live_results ? h('section', { style: { marginTop: '2.5rem' } },
-      h('h2', 'Live standings'), h('div#results', h('div.spinner', { role: 'status', 'aria-label': 'Loading' }))) : null),
-  h('footer.footer', 'Votes are protected against duplicates and spam.'));
-  // Watch the header only once it is on the page.
+  fill(app, topbar, hero, head, h('main.wrap', info, seg, content),
+    h('footer.footer', 'Votes are protected against duplicates and spam.'));
+  // Watch the title only once it is on the page.
   heroObserver?.disconnect();
   heroObserver = new IntersectionObserver(([e]) => topbar.classList.toggle('show', !e.isIntersecting), { rootMargin: '-40px 0px 0px 0px' });
-  heroObserver.observe(hero);
+  heroObserver.observe(head);
 }
+
+const standingsView = (data) => data.length ? standingsList(data, event, { showCounts: event.show_vote_counts }) : h('p.muted.empty', 'No votes yet.');
 
 let resultsBusy = false;
 async function loadResults() {
@@ -238,7 +283,8 @@ async function loadResults() {
   try { ({ data } = await sb.rpc('get_results', { p_event_id: event.id })); } finally { resultsBusy = false; }
   const box = $('#results'); // re-read: the page may have re-rendered meanwhile
   if (!data || !box) return;
-  fill(box, data.length ? standingsList(data, event, { showCounts: event.show_vote_counts }) : h('p.muted', 'No votes yet.'));
+  lastResults = data;
+  fill(box, standingsView(data));
 }
 
 // ---------------------------------------------------------------------
