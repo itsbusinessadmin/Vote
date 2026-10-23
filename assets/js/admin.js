@@ -361,7 +361,7 @@ async function tabEvent(main) {
       h('h2.card-title', 'Images'),
       h('div.grid-2',
         imageUpload('Logo', 'logo_url', { hint: 'Square, 600 × 600 px. PNG with a transparent background works best. It also appears in screenshots.', maxSide: 600 }),
-        imageUpload('Banner / background', 'banner_url', { wide: true, hint: 'Wide image for the top of the voting page: 1920 × 640 px (3:1). The edges get cropped on phones and wide screens, so keep text and faces in the center.', maxSide: 1920 }))),
+        imageUpload('Banner / background', 'banner_url', { wide: true, hint: 'Shown whole across the top of the voting page, never cropped. 1920 × 1080 px (16:9) looks biggest on phones; a wide 1920 × 640 px (3:1) banner also works.', maxSide: 1920 }))),
     h('div.row', { style: { marginTop: '1rem' } },
       h('button.btn.primary', { onclick: async () => {
         d.slug = slugify(d.slug || d.title);
