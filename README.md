@@ -17,7 +17,7 @@ the database, admin login and image storage run on the **Supabase free tier**. T
 **Admin**
 - **Password-only sign-in**: devices you've signed in on stay signed in. There is a devices list, "sign out other devices" and password change.
 - **Event & branding**: title, subtitle, description, logo, banner, theme color, open/close times, multiple events, share link + QR code.
-- **Contestants**: add, edit, reorder, hide and delete, with photo upload. Optionally add a **video** (plays in a pop-up player when voters tap the photo, up to 50 MB) or a **link** (opens in a new tab). Images are compressed in the browser to save free storage.
+- **Contestants**: add, edit, reorder, hide and delete, with photo upload. Optionally add a **video** (plays in a pop-up player when voters tap the photo; videos over 50 MB are compressed in the browser to under 45 MB) or a **link** (opens in a new tab). Images are compressed in the browser to save free storage.
 - **Criteria**: name, percentage (weight) and description. Shows a warning when the total isn't 100%.
 - **Voting rules**
   - *Voting style*: "Pick a contestant" (criteria shown as a guide), or "Rate each criterion" (1–N sliders, weighted score).

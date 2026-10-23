@@ -179,11 +179,73 @@ export async function uploadImage(bucket, folder, file, maxSide) {
 }
 
 export const MAX_VIDEO_MB = 50;
+const TARGET_VIDEO_MB = 45; // what bigger videos are compressed down to
 
-// Videos are uploaded as-is (no re-encoding in the browser).
-export async function uploadVideo(folder, file) {
+// Re-encodes a video in the browser (WebCodecs, via mediabunny) so it fits in
+// targetMB. onProgress gets a number from 0 to 1.
+export async function compressVideo(file, targetMB = TARGET_VIDEO_MB, onProgress) {
+  if (typeof VideoEncoder === 'undefined') {
+    throw new Error('This browser cannot compress videos. Use the latest Chrome or Edge, or compress it first.');
+  }
+  const mb = await import('https://cdn.jsdelivr.net/npm/mediabunny@1.61.1/+esm');
+  const input = new mb.Input({ source: new mb.BlobSource(file), formats: mb.ALL_FORMATS });
+  const duration = await input.computeDuration();
+  if (!duration) throw new Error('Could not read the video length.');
+  const audioBitrate = 96_000;
+
+  const SIDES = [1080, 720, 540, 360];
+  const attempt = async (budget, minStep) => {
+    // Capped at 8 Mbps: plenty for the pop-up player, and encoders overshoot less.
+    const videoBitrate = Math.min(8_000_000, Math.max(200_000, Math.floor((budget * 8 * 0.95) / duration) - audioBitrate));
+    // Lower bitrates look better at a smaller size; cap the short side.
+    const step = Math.max(minStep, videoBitrate > 2_500_000 ? 0 : videoBitrate > 1_000_000 ? 1 : videoBitrate > 500_000 ? 2 : 3);
+    const shortSide = SIDES[Math.min(step, SIDES.length - 1)];
+    const output = new mb.Output({ format: new mb.Mp4OutputFormat({ fastStart: 'in-memory' }), target: new mb.BufferTarget() });
+    const conversion = await mb.Conversion.init({
+      input, output, tracks: 'primary', showWarnings: false,
+      video: async (track) => {
+        const w = track.displayWidth, h = track.displayHeight;
+        const scale = Math.min(1, shortSide / Math.min(w, h));
+        const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+        const width = even(w * scale), height = even(h * scale);
+        const codec = await mb.getFirstEncodableVideoCodec(['avc', 'vp9', 'av1'], { width, height, bitrate: videoBitrate });
+        // Constant bitrate keeps the file size predictable.
+        return { width, height, fit: 'fill', codec: codec || undefined, quality: new mb.Quality({ bitrate: videoBitrate, bitrateMode: 'constant' }), forceTranscode: true };
+      },
+      audio: async () => {
+        const codec = await mb.getFirstEncodableAudioCodec(['aac', 'opus'], { bitrate: audioBitrate });
+        return codec ? { codec, quality: new mb.Quality({ bitrate: audioBitrate }), forceTranscode: true } : { discard: true };
+      },
+    });
+    if (!conversion.isValid) throw new Error('This video format cannot be compressed in the browser.');
+    conversion.onProgress = (p) => onProgress?.(p);
+    await conversion.execute();
+    return { buf: output.target.buffer, step };
+  };
+
+  // Encoders can overshoot the bitrate, especially at high resolutions; if
+  // that happens, try again smaller.
+  const limit = targetMB * 1024 * 1024;
+  let budget = limit, minStep = 0, buf;
+  for (let i = 0; i < 3; i++) {
+    let step;
+    ({ buf, step } = await attempt(budget, minStep));
+    if (buf.byteLength <= limit) break;
+    budget *= Math.min(0.9, (limit / buf.byteLength) * 0.9);
+    minStep = step + 1;
+  }
+  if (buf.byteLength > limit) throw new Error(`Could only compress the video to ${(buf.byteLength / 1048576).toFixed(0)} MB. Trim it and try again.`);
+  return new File([buf], file.name.replace(/\.[^.]*$/, '') + '.mp4', { type: 'video/mp4' });
+}
+
+// Videos up to MAX_VIDEO_MB are uploaded as-is; bigger ones are compressed
+// to TARGET_VIDEO_MB first. onStatus gets a short progress message.
+export async function uploadVideo(folder, file, onStatus) {
   if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
-    throw new Error(`The video is ${(file.size / 1048576).toFixed(0)} MB. The limit is ${MAX_VIDEO_MB} MB; trim or compress it first.`);
+    const from = (file.size / 1048576).toFixed(0);
+    onStatus?.(`Compressing ${from} MB video…`);
+    file = await compressVideo(file, TARGET_VIDEO_MB, (p) => onStatus?.(`Compressing ${from} MB video… ${Math.round(p * 100)}%`));
+    onStatus?.(`Uploading compressed video (${(file.size / 1048576).toFixed(0)} MB)…`);
   }
   const ext = (file.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
   const type = file.type || (ext === 'mov' ? 'video/quicktime' : `video/${ext}`);
