@@ -43,10 +43,12 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 |---|---|---|
 | Browser token (always on) | Same browser voting again | Saved in localStorage, a cookie and IndexedDB. Clearing one store restores it from the others. |
 | **Device fingerprint** | Incognito/private windows, clearing data, a second browser on the same device | Hash of GPU, screen, CPU cores, fonts, canvas, audio, timezone and language. |
-| **Same computer, other browser** | Switching Chrome → Edge → Firefox on one PC or phone | Matches the same OS, screen, CPU cores and timezone **on the same network**. Identical PCs on one network (e.g. a school lab) can count as one voter, so turn this off for lab-based voting. |
+| **Same computer, other browser** | Switching Chrome → Edge → Firefox (or an in-app browser like Messenger) on one PC or phone | Matches the same OS, screen size, CPU cores and timezone **on the same network** (same IPv4 /24 or IPv6 /64, so mobile data that hops between addresses still matches). Identical PCs on one network (e.g. a school lab) can count as one voter, so turn this off for lab-based voting. |
 | Same email / mobile | One person, many devices | |
 | Same name | Lazy duplicates | Normalized, e.g. "Juan Dela Cruz" = "juan delacruz". |
 | Same IP | Online-only events | **Don't use at a venue**: everyone on the same Wi-Fi shares one IP. |
+| Max voters per connection | One household or vote farm creating many voters | Online-only, for the same reason. 0 = off. |
+| Block private windows | Incognito, which wipes the browser token | Off by default. A best guess, mainly in Chrome. |
 | Bot blocking | Automated / headless browsers | |
 | Cooldown | Spam clicking | |
 | Admin block | Anyone you flag | |

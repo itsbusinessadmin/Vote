@@ -586,6 +586,7 @@ const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'cur
   'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
   'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label',
   'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots',
+  'block_private', 'max_voters_per_network',
   'cooldown_seconds', 'show_live_results', 'show_vote_counts'];
 
 const LIMIT_PRESETS = [
@@ -701,7 +702,11 @@ async function tabRules(main, draft) {
         check(d, 'limit_by_contact', 'Same email or mobile number', 'One email / number = one voter.')),
       check(d, 'limit_by_name', 'Same name', '"Juan Dela Cruz" = "juan delacruz". Two people can share a name.'),
       check(d, 'limit_by_ip', 'Same internet connection (IP)',
-        'Everyone on one Wi-Fi shares an IP. Only for online voting, never at a live venue.')),
+        'Everyone on one Wi-Fi shares an IP. Only for online voting, never at a live venue.'),
+      field('Max voters per internet connection', input(d, 'max_voters_per_network', 'number', { min: 0 }),
+        'Stops one household or vote farm from making many "voters" on one Wi-Fi. For online voting only; at a venue everyone shares the Wi-Fi. 0 = no limit.'),
+      check(d, 'block_private', 'Block private / incognito windows',
+        'Incognito wipes the browser token, so blocking it removes an easy way to vote again. Detection is a best guess (mainly Chrome) and can occasionally flag a phone that is almost out of storage.')),
 
     section('display', 6, 'Results on the voting page', null,
       check(d, 'show_live_results', 'Show live standings to voters'),
@@ -739,7 +744,7 @@ async function tabRules(main, draft) {
       return;
     }
     const patch = Object.fromEntries(RULE_KEYS.map((k) => [k, d[k]]));
-    for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds']) {
+    for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds', 'max_voters_per_network']) {
       patch[k] = Math.max(0, Number(patch[k]) || 0);
     }
     patch.score_max = Math.min(100, Math.max(2, patch.score_max));
@@ -850,11 +855,14 @@ async function tabVotes(main) {
   const fpCount = countBy(voters, 'fingerprint');
   const ipCount = countBy(voters, 'ip');
   const nameCount = countBy(voters, 'name_norm');
-  const crossCount = countBy(voters.map((v) => ({ k: v.cross_id && `${v.cross_id}|${v.ip}` })), 'k');
+  // Same "computer" id on the same network block (IPv4 /24, IPv6 /64), like the server checks.
+  const ipNet = (ip) => (ip || '').includes(':') ? ip.split(':').slice(0, 4).join(':') : (ip || '').split('.').slice(0, 3).join('.');
+  const crossKey = (v) => v.cross_id && `${v.cross_id}|${ipNet(v.ip)}`;
+  const crossCount = countBy(voters.map((v) => ({ k: crossKey(v) })), 'k');
 
   const flags = (v) => [
     fpCount[v.fingerprint] > 1 && `${fpCount[v.fingerprint]} voters share this device fingerprint`,
-    v.cross_id && crossCount[`${v.cross_id}|${v.ip}`] > 1 && `${crossCount[`${v.cross_id}|${v.ip}`]} voters look like the same computer (different browsers)`,
+    v.cross_id && crossCount[crossKey(v)] > 1 && `${crossCount[crossKey(v)]} voters look like the same device (different browsers)`,
     v.ip && ipCount[v.ip] > 1 && `${ipCount[v.ip]} voters share this IP`,
     v.name_norm && nameCount[v.name_norm] > 1 && `${nameCount[v.name_norm]} voters share this name`,
     v.device_info?.private_mode_guess && 'Probably a private/incognito window',

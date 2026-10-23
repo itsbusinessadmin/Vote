@@ -77,6 +77,8 @@ create table if not exists public.events (
   limit_by_name             boolean not null default false,
   limit_by_contact          boolean not null default true,
   block_bots                boolean not null default true,
+  block_private             boolean not null default false,
+  max_voters_per_network    int  not null default 0 check (max_voters_per_network >= 0), -- 0 = unlimited
   cooldown_seconds          int  not null default 3 check (cooldown_seconds >= 0),
 
   -- public display
@@ -141,6 +143,8 @@ exception when duplicate_object then null; end $$;
 alter table public.events add column if not exists limit_by_cross_browser boolean not null default true;
 alter table public.voters add column if not exists cross_id text;
 alter table public.events add column if not exists email_domains text;
+alter table public.events add column if not exists block_private boolean not null default false;
+alter table public.events add column if not exists max_voters_per_network int not null default 0 check (max_voters_per_network >= 0);
 
 create index if not exists voters_fp_idx    on public.voters (event_id, fingerprint);
 create index if not exists voters_cross_idx on public.voters (event_id, cross_id);
@@ -255,12 +259,20 @@ returns text language sql immutable as $$
 $$;
 
 -- The household/office network an address belongs to. IPv6 devices rotate
--- their last 64 bits for privacy, so compare the /64 prefix only.
+-- their last 64 bits for privacy, so compare the /64 prefix only. Mobile data
+-- (carrier-grade NAT) can give each new connection a different IPv4 address
+-- from the same block, so IPv4 compares the /24 (a.b.c.*).
 create or replace function public._ip_net(ip text)
 returns text language sql immutable as $$
   select case when coalesce(ip, '') like '%:%'
               then array_to_string((string_to_array(ip, ':'))[1:4], ':')
-              else coalesce(ip, '') end;
+              else array_to_string((string_to_array(coalesce(ip, ''), '.'))[1:3], '.') end;
+$$;
+
+-- One internet connection: the exact IPv4 address, or the IPv6 /64.
+create or replace function public._ip_conn(ip text)
+returns text language sql immutable as $$
+  select case when coalesce(ip, '') like '%:%' then public._ip_net(ip) else coalesce(ip, '') end;
 $$;
 
 -- All voter rows in this event that count as "the same person" under the
@@ -350,6 +362,8 @@ begin
     v_code := 'NO_DEVICE'; v_msg := 'Your browser could not be verified. Please enable JavaScript and storage, then reload.';
   elsif e.block_bots and coalesce((p_voter ->> 'webdriver')::boolean, false) then
     v_code := 'BOT'; v_msg := 'Automated browsers are not allowed to vote.';
+  elsif e.block_private and coalesce((p_voter -> 'device_info' ->> 'private_mode_guess')::boolean, false) then
+    v_code := 'PRIVATE'; v_msg := 'Private / incognito windows cannot vote. Please open the link in a normal window.';
   elsif e.require_name and length(v_norm) < 2 then
     v_code := 'NAME_REQUIRED'; v_msg := 'Please enter your name.';
   elsif e.ask_email and v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then
@@ -407,7 +421,11 @@ begin
         into v_used, v_distinct, v_last
         from public.votes where voter_id = any (v_ids) and status <> 'rejected';
 
-      if e.cooldown_seconds > 0 and v_last is not null and now() - v_last < make_interval(secs => e.cooldown_seconds) then
+      if cardinality(v_ids) = 0 and e.max_voters_per_network > 0 and v_ip <> '' and (
+            select count(*) from public.voters
+             where event_id = e.id and public._ip_conn(ip) = public._ip_conn(v_ip)) >= e.max_voters_per_network then
+        v_code := 'NETWORK_LIMIT'; v_msg := 'Too many people have already voted from this internet connection.';
+      elsif e.cooldown_seconds > 0 and v_last is not null and now() - v_last < make_interval(secs => e.cooldown_seconds) then
         v_code := 'TOO_FAST'; v_msg := 'Please wait a few seconds before voting again.';
       elsif e.max_votes_per_voter > 0 and v_used + v_qty > e.max_votes_per_voter then
         v_code := 'LIMIT_REACHED';
