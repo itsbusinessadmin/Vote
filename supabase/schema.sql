@@ -662,6 +662,17 @@ create policy "proofs admin delete" on storage.objects for delete to authenticat
   using (bucket_id = 'proofs' and public.is_admin());
 
 -- ---------------------------------------------------------------------
+-- Realtime: the voting page listens for admin changes to these tables and
+-- refreshes itself. Row level security still decides who receives what.
+-- ---------------------------------------------------------------------
+do $$ begin alter publication supabase_realtime add table public.events;
+exception when duplicate_object or undefined_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table public.contestants;
+exception when duplicate_object or undefined_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table public.criteria;
+exception when duplicate_object or undefined_object then null; end $$;
+
+-- ---------------------------------------------------------------------
 -- Admin login helpers (password-only sign-in + remembered devices)
 -- ---------------------------------------------------------------------
 create or replace function public.admin_exists()

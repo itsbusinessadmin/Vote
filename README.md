@@ -25,6 +25,7 @@ the database, admin login and image storage run on the **Supabase free tier**. T
   - *Limits*: total votes per person, how many different contestants, and whether repeat votes for the same contestant are allowed. One-click presets are included.
   - *Voter details*: name, email, mobile, and a custom field (e.g. Student ID). Email can be limited to specific domains (e.g. only `@ces.edu.ph`).
 - **Anti-cheat** (see below), plus a log of every blocked attempt.
+- **Live updates**: changes saved in the admin (title, banner, contestants, criteria, rules, opening/closing voting) appear on open voting pages within a second, with no reload. Uses Supabase Realtime; if its connection limit is reached (200 on the free plan), pages check for changes every 30 seconds instead.
 - **Payments**: view receipts, approve or reject individually, approve all, see totals.
 - **Votes & voters**: every voter with device, OS, model, IP and fingerprint. Shared-device, shared-IP, shared-name and incognito voters are flagged. Block or unblock voters, delete votes, export CSV, reset.
 - **Screenshot tab**: a styled standings board (podium + list) that you capture as a PNG or copy to the clipboard. You can show names and photos, **numbers only**, or go **fully anonymous** (Contestant A, B, C…). It also has Top 3/5/10, a dark or light style, a custom title and footer note, and an admin-only detailed table with per-criterion averages.
