@@ -25,18 +25,7 @@ async function main() {
   const slug = new URLSearchParams(location.search).get('e');
   if (!slug) return renderEventList();
 
-  // Event, contestants and criteria in a single request.
-  const { data, error } = await sb.from('events').select('*, contestants(*), criteria(*)').eq('slug', slug).maybeSingle();
-  if (error || !data) {
-    fill(app, h('div.center-card', h('h2', 'Event not found'), h('p.muted', 'Check the link you were given.')));
-    return;
-  }
-  ({ contestants, criteria, ...event } = data);
-  contestants = contestants.filter((c) => c.active).sort(bySortOrder);
-  criteria = criteria.sort(bySortOrder);
-  document.title = event.title;
-  setTheme(event.theme_color);
-  if (event.logo_url) document.head.append(h('link', { rel: 'icon', href: event.logo_url }));
+  if (!(await loadEvent(slug))) return;
 
   // Show the page now; this device's votes fill in a moment later.
   render();
@@ -44,13 +33,83 @@ async function main() {
   await refreshStatus();
   render();
   scheduleWindowChanges();
+  watchAdminChanges(slug);
 
-  if (event.show_live_results) {
-    loadResults();
-    // Poll every 15 s, and not at all while the tab is hidden.
-    setInterval(() => { if (!document.hidden) loadResults(); }, 15000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadResults(); });
+  if (event.show_live_results) loadResults();
+  // Poll results every 15 s (if shown), and not at all while the tab is hidden.
+  setInterval(() => { if (!document.hidden && event?.show_live_results) loadResults(); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && event?.show_live_results) loadResults(); });
+}
+
+// Event, contestants and criteria in a single request. Returns false (and
+// shows a message) when the event is missing or unpublished.
+async function loadEvent(slug) {
+  const { data, error } = await sb.from('events').select('*, contestants(*), criteria(*)').eq('slug', slug).maybeSingle();
+  if (error && event) return true; // network blip on a reload: keep showing what we have
+  if (error || !data) {
+    fill(app, h('div.center-card', h('h2', 'Event not found'), h('p.muted', 'Check the link you were given.')));
+    event = null;
+    return false;
   }
+  ({ contestants, criteria, ...event } = data);
+  contestants = contestants.filter((c) => c.active).sort(bySortOrder);
+  criteria = criteria.sort(bySortOrder);
+  document.title = event.title;
+  setTheme(event.theme_color);
+  if (event.logo_url) {
+    const fav = document.head.querySelector('link[rel=icon]') || document.head.appendChild(h('link', { rel: 'icon' }));
+    fav.href = event.logo_url;
+  }
+  return true;
+}
+
+// Changes made in the admin page show up here without a reload: Supabase
+// Realtime tells us when this event, its contestants or its criteria change.
+// If Realtime is unavailable (the free plan allows 200 connections at once)
+// we poll instead. The connection is closed while the tab is hidden.
+function watchAdminChanges(slug) {
+  let timer = null, channel = null, pollTimer = null, wasShowingResults = event.show_live_results;
+  const reload = () => {
+    clearTimeout(timer);
+    // Debounced: one admin save can touch many rows (e.g. reordering).
+    timer = setTimeout(async () => {
+      const ok = await loadEvent(slug);
+      if (!ok) return;
+      await refreshStatus();
+      render();
+      scheduleWindowChanges(); // start/end times may have changed
+      if (event.show_live_results && !wasShowingResults) loadResults();
+      wasShowingResults = event.show_live_results;
+    }, 400);
+  };
+  // Deletes can't be filtered by event (they only carry the row id), so
+  // ignore deletes of rows that aren't on this page.
+  const onChange = (p) => {
+    if (p?.eventType === 'DELETE' && ![...contestants, ...criteria].some((x) => x.id === p.old?.id)) return;
+    reload();
+  };
+  const startPolling = () => { pollTimer ||= setInterval(() => { if (!document.hidden) reload(); }, 30000); };
+  const connect = () => {
+    if (channel || !event) return;
+    const id = event.id;
+    channel = sb.channel(`event-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `id=eq.${id}` }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contestants', filter: `event_id=eq.${id}` }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'criteria', filter: `event_id=eq.${id}` }, onChange)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'contestants' }, onChange)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'criteria' }, onChange)
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') { clearInterval(pollTimer); pollTimer = null; }
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') startPolling();
+      });
+  };
+  const disconnect = () => { if (channel) { sb.removeChannel(channel); channel = null; } };
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { disconnect(); return; }
+    reload(); // catch up on anything missed while hidden
+    connect();
+  });
+  connect();
 }
 
 // Re-render when voting opens or closes while the page is open.
