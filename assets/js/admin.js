@@ -360,8 +360,8 @@ async function tabEvent(main) {
     h('div.card.section.stack',
       h('h2.card-title', 'Images'),
       h('div.grid-2',
-        imageUpload('Logo', 'logo_url', { hint: 'Square PNG works best. It also appears in screenshots.', maxSide: 600 }),
-        imageUpload('Banner / background', 'banner_url', { wide: true, hint: 'Wide image for the top of the voting page.', maxSide: 1920 }))),
+        imageUpload('Logo', 'logo_url', { hint: 'Square, 600 × 600 px. PNG with a transparent background works best. It also appears in screenshots.', maxSide: 600 }),
+        imageUpload('Banner / background', 'banner_url', { wide: true, hint: 'Wide image for the top of the voting page: 1920 × 640 px (3:1). The edges get cropped on phones and wide screens, so keep text and faces in the center.', maxSide: 1920 }))),
     h('div.row', { style: { marginTop: '1rem' } },
       h('button.btn.primary', { onclick: async () => {
         d.slug = slugify(d.slug || d.title);
@@ -452,7 +452,10 @@ async function editContestant(c, order = 0) {
         uploading = true;
         drawVideo(`Uploading ${f.name}…`);
         try {
-          const url = await uploadVideo(`${ev.id}/contestants`, f);
+          const url = await uploadVideo(`${ev.id}/contestants`, f, (msg) => {
+            const st = videoBox.querySelector('[role=status]');
+            if (st && st.textContent !== msg) st.textContent = msg;
+          });
           if (d.video_url && d.video_url !== c?.video_url) deleteVideo(d.video_url); // unsaved earlier upload
           d.video_url = url;
           uploading = false;
@@ -471,7 +474,7 @@ async function editContestant(c, order = 0) {
   drawVideo('');
   const prev = h('div.preview', { style: d.photo_url ? { backgroundImage: `url("${d.photo_url}")`, backgroundSize: 'cover' } : {} }, d.photo_url ? '' : 'No photo');
   const body = h('div.stack',
-    h('div.upload', prev, h('div.row',
+    h('div.upload', prev, h('div.stack', h('div.row',
       h('button.btn.sm', { onclick: async (e) => {
         const f = await pickFile();
         if (!f) return;
@@ -483,7 +486,8 @@ async function editContestant(c, order = 0) {
         } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
         e.target.disabled = false;
       } }, 'Upload photo'),
-      h('button.btn.sm.ghost', { onclick: () => { d.photo_url = null; prev.style.backgroundImage = ''; prev.textContent = 'No photo'; } }, 'Remove'))),
+      h('button.btn.sm.ghost', { onclick: () => { d.photo_url = null; prev.style.backgroundImage = ''; prev.textContent = 'No photo'; } }, 'Remove')),
+      h('small.muted', 'Portrait 4:5, e.g. 720 × 900 px. Keep the face near the top center.'))),
     h('div.grid-2',
       field('Name', nameIn),
       field('Number / code', input(d, 'number', 'text', { placeholder: 'e.g. 7' }))),
@@ -494,7 +498,7 @@ async function editContestant(c, order = 0) {
       h('div.field',
         h('span.field-label', 'Video'),
         videoBox,
-        h('small.muted', `MP4, WebM or MOV, up to ${MAX_VIDEO_MB} MB. Large videos can take a minute to upload.`)),
+        h('small.muted', `MP4, WebM or MOV. Videos over ${MAX_VIDEO_MB} MB are compressed automatically before upload (keep this window open). Best: 1080p or 720p MP4.`)),
       field('Link', linkIn, 'For example a YouTube, Facebook or TikTok post. Used when there is no uploaded video.')),
     check(d, 'active', 'Visible to voters', 'Untick to hide this contestant without deleting their votes.'));
 
@@ -671,7 +675,7 @@ async function tabRules(main, draft) {
           field('Currency', input(d, 'currency', 'text', { maxLength: 3, placeholder: 'PHP' }), 'Three-letter code, e.g. PHP, USD.'),
           field('Max votes in one purchase', input(d, 'max_qty_per_vote', 'number', { min: 1 }))),
         field('Payment instructions', input(d, 'payment_instructions', 'textarea', { placeholder: 'Send payment to GCash 09xx-xxx-xxxx (Juan D.). Then enter the reference number below.' })),
-        imageUpload('Payment QR code (optional)', 'payment_qr_url', { hint: 'For example, your GCash / Maya / bank QR.', maxSide: 900 }),
+        imageUpload('Payment QR code (optional)', 'payment_qr_url', { hint: 'For example, your GCash / Maya / bank QR. Square, up to 900 × 900 px.', maxSide: 900 }),
         check(d, 'require_payment_proof', 'Require a reference number or receipt', 'Voters must enter a reference no. or upload a screenshot.'),
         h('p.small.muted', 'Paid votes stay "pending" until you approve them in the Payments tab. Only approved votes count.'))),
 
