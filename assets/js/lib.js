@@ -85,9 +85,10 @@ export function fieldError(input, message) {
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 // Accessible dialog: named by its title, Escape closes, Tab stays inside,
-// focus returns to the opener on close.
+// focus returns to the opener on close. With xOnly, only the × button closes
+// it (no Escape, no tap outside), e.g. while someone is paying.
 let dialogSeq = 0;
-export function modal(title, body, actions = [], { className = '' } = {}) {
+export function modal(title, body, actions = [], { className = '', xOnly = false } = {}) {
   return new Promise((resolve) => {
     const opener = document.activeElement;
     const titleId = `dlg-${++dialogSeq}`;
@@ -98,7 +99,7 @@ export function modal(title, body, actions = [], { className = '' } = {}) {
       resolve(val);
     };
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); close(null); return; }
+      if (e.key === 'Escape') { e.preventDefault(); if (!xOnly) close(null); return; }
       if (e.key !== 'Tab') return;
       const items = [...dialog.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null);
       if (!items.length) return;
@@ -120,7 +121,7 @@ export function modal(title, body, actions = [], { className = '' } = {}) {
           catch (err) { toast(err.message || String(err), 'error'); }
           finally { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         } }, a.label))) : null);
-    const wrap = h('div.modal-wrap', { onclick: (e) => e.target === wrap && close(null) }, dialog);
+    const wrap = h('div.modal-wrap', { onclick: (e) => !xOnly && e.target === wrap && close(null) }, dialog);
     document.body.append(wrap);
     document.addEventListener('keydown', onKey, true);
     (dialog.querySelector('.modal-body input, .modal-body textarea, .modal-body select') ||
