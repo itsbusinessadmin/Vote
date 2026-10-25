@@ -268,7 +268,7 @@ function render() {
       } })) : null;
 
   // Shown above the contestants once this voter has used every vote.
-  const outOfVotes = event.credits_enabled !== false && state.open && !myStatus?.blocked && remaining === 0;
+  const outOfVotes = event.pricing === 'free_paid' && event.credits_enabled !== false && state.open && !myStatus?.blocked && remaining === 0;
   const creditsNotice = outOfVotes ? h('div.credits-notice', { role: 'status' },
     h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 24)),
     h('div.credits-text',

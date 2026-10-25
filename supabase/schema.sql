@@ -52,7 +52,7 @@ create table if not exists public.events (
   -- how votes work
   voting_mode               text not null default 'simple' check (voting_mode in ('simple', 'criteria')),
   score_max                 int  not null default 10 check (score_max between 2 and 100),
-  pricing                   text not null default 'free' check (pricing in ('free', 'paid')),
+  pricing                   text not null default 'free' check (pricing in ('free', 'paid', 'free_paid')),
   price_per_vote            numeric(12, 2) not null default 0,
   currency                  text not null default 'PHP',
   payment_instructions      text,
@@ -147,7 +147,10 @@ alter table public.events add column if not exists email_domains text;
 alter table public.events add column if not exists block_private boolean not null default false;
 alter table public.events add column if not exists desktop_only boolean not null default false;
 alter table public.events add column if not exists max_voters_per_network int not null default 0 check (max_voters_per_network >= 0);
--- "Buy more votes" notice shown to voters who have used every vote
+-- 'free_paid': votes are free, and voters who used every vote can buy more.
+alter table public.events drop constraint if exists events_pricing_check;
+alter table public.events add constraint events_pricing_check check (pricing in ('free', 'paid', 'free_paid'));
+-- "Buy more votes" notice shown to voters who have used every vote (free + paid)
 alter table public.events add column if not exists credits_enabled boolean not null default true;
 alter table public.events add column if not exists credits_price numeric(12, 2) not null default 1 check (credits_price >= 0);
 alter table public.events add column if not exists credits_title text;
@@ -396,7 +399,7 @@ begin
   end if;
 
   if v_code is null then
-    if e.pricing = 'free' then
+    if e.pricing <> 'paid' then  -- free, or free + paid
       v_qty := 1;
     elsif v_qty < 1 or v_qty > e.max_qty_per_vote then
       v_code := 'BAD_QUANTITY'; v_msg := 'Choose between 1 and ' || e.max_qty_per_vote || ' votes.';

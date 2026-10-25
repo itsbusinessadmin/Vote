@@ -537,3 +537,5 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
   font-size: .9rem; font-weight: 700; color: var(--warn-ink);
   background: color-mix(in srgb, var(--warn) 14%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
 .confirm-note .icon { margin-top: .1rem; }
+.subsection { margin-top: .25rem; padding: .9rem; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
+  background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
