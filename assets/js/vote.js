@@ -1,5 +1,5 @@
 import { sb, configured, $, h, fill, icon, fieldError, toast, modal, money, setTheme, notConfigured, uploadImage, cleanUrl } from './lib.js';
-import { getDevice } from './device.js';
+import { getDevice, formFactor } from './device.js';
 import { standingsList, initials } from './standings.js';
 import { rulesList } from './rules.js';
 
@@ -171,7 +171,26 @@ function disclosure(key, title, ...body) {
   return d;
 }
 
+// Shown instead of the voting page on phones and tablets when the event is
+// set to "desktop or laptop only".
+function renderComputerOnly() {
+  heroObserver?.disconnect();
+  const link = location.href;
+  fill(app,
+    event.banner_url ? h('header.hero.has-banner',
+      h('img.banner-fill', { src: event.banner_url, alt: '', 'aria-hidden': 'true' }),
+      h('img.banner-img', { src: event.banner_url, alt: '' })) : h('header.hero.plain'),
+    h('main.event-head', h('div.event-card.computer-only',
+      h('div.computer-icon', icon('monitor', 30)),
+      h('h1', 'Please use a computer'),
+      h('p', `Voting for ${event.title} only works on a desktop or laptop computer. Open this link on your computer to vote.`),
+      h('code', link),
+      h('button.btn.primary', { type: 'button', onclick: () => navigator.clipboard.writeText(link)
+        .then(() => toast('Link copied', 'success'), () => toast('Could not copy. Select the link and copy it manually.', 'error')) }, 'Copy link'))));
+}
+
 function render() {
+  if (event.desktop_only && formFactor() !== 'desktop') return renderComputerOnly();
   const state = votingState();
   const remaining = myStatus?.remaining;
   if (!event.show_live_results) view = 'contestants';

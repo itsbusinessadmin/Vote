@@ -21,6 +21,7 @@ export function rulesList(e) {
   if (e.ask_email && domains.length) r.push(`Only ${domains.map((d) => '@' + d).join(' or ')} email addresses can vote.`);
   r.push('Each device can only vote within these limits, even from a different browser. Repeat or fake votes are detected and blocked.');
   if (e.block_private) r.push('Private / incognito windows cannot vote.');
+  if (e.desktop_only) r.push('Voting only works on a desktop or laptop computer, not on phones or tablets.');
   if (e.ends_at) r.push(`Voting ends ${new Date(e.ends_at).toLocaleString()}.`);
   return r;
 }
