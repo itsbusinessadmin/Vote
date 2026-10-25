@@ -78,6 +78,7 @@ create table if not exists public.events (
   limit_by_contact          boolean not null default true,
   block_bots                boolean not null default true,
   block_private             boolean not null default false,
+  desktop_only              boolean not null default false,
   max_voters_per_network    int  not null default 0 check (max_voters_per_network >= 0), -- 0 = unlimited
   cooldown_seconds          int  not null default 3 check (cooldown_seconds >= 0),
 
@@ -144,6 +145,7 @@ alter table public.events add column if not exists limit_by_cross_browser boolea
 alter table public.voters add column if not exists cross_id text;
 alter table public.events add column if not exists email_domains text;
 alter table public.events add column if not exists block_private boolean not null default false;
+alter table public.events add column if not exists desktop_only boolean not null default false;
 alter table public.events add column if not exists max_voters_per_network int not null default 0 check (max_voters_per_network >= 0);
 
 create index if not exists voters_fp_idx    on public.voters (event_id, fingerprint);
@@ -364,6 +366,9 @@ begin
     v_code := 'BOT'; v_msg := 'Automated browsers are not allowed to vote.';
   elsif e.block_private and coalesce((p_voter -> 'device_info' ->> 'private_mode_guess')::boolean, false) then
     v_code := 'PRIVATE'; v_msg := 'Private / incognito windows cannot vote. Please open the link in a normal window.';
+  elsif e.desktop_only and (coalesce(p_voter -> 'device_info' ->> 'type', '') <> 'Desktop / Laptop'
+                            or v_ua ~* '(Mobi|iPhone|iPad|iPod|Android|Tablet|Silk|Kindle)') then
+    v_code := 'DESKTOP_ONLY'; v_msg := 'Voting for this event only works on a desktop or laptop computer.';
   elsif e.require_name and length(v_norm) < 2 then
     v_code := 'NAME_REQUIRED'; v_msg := 'Please enter your name.';
   elsif e.ask_email and v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then

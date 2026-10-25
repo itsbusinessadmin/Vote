@@ -140,8 +140,18 @@ function parseUA(ua) {
     /Mac OS X ([\d_]+)/.test(ua) ? 'macOS ' + RegExp.$1.replace(/_/g, '.') :
     /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : 'Unknown';
   const model = /Android [\d.]+; ([^;)]+)/.test(ua) ? RegExp.$1.trim() : null;
-  const type = /iPad|Tablet/.test(ua) ? 'Tablet' : /Mobi|iPhone|Android/.test(ua) ? 'Phone' : 'Desktop / Laptop';
+  const type = { phone: 'Phone', tablet: 'Tablet', desktop: 'Desktop / Laptop' }[formFactor(ua)];
   return { browser, os, model, type };
+}
+
+// 'phone', 'tablet' or 'desktop'. iPads report themselves as Macs, so a
+// "Mac" with a touchscreen is an iPad. Android tablets leave "Mobile" out of
+// their user agent. Touchscreen Windows laptops still count as desktop.
+export function formFactor(ua = navigator.userAgent) {
+  if (/iPad|Tablet|PlayBook|Silk|Kindle/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 0)) return 'tablet';
+  if (/Android/.test(ua) && !/Mobi/.test(ua)) return 'tablet';
+  if (/Mobi|iPhone|iPod|Android|BlackBerry|IEMobile|Opera Mini/i.test(ua)) return 'phone';
+  return 'desktop';
 }
 
 async function privateModeGuess() {
