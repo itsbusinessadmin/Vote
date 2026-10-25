@@ -656,7 +656,7 @@ function choice(obj, key, legend, options) {
       h('div', h('b', title), desc ? h('small', desc) : null))));
 }
 
-async function tabRules(main, draft) {
+async function tabRules(main, draft, openId) {
   const d = draft || { ...ev };
   const { count: criteriaCount } = await sb.from('criteria').select('id', { count: 'exact', head: true }).eq('event_id', ev.id);
   const norm = (v) => (v == null ? '' : String(v));
@@ -675,7 +675,9 @@ async function tabRules(main, draft) {
   const drawPresets = () => fill(presetRow, LIMIT_PRESETS.map(([title, desc, p]) => {
     const active = Object.entries(p).every(([k, v]) => norm(d[k]) === norm(v));
     return h('button.preset', { type: 'button', 'aria-pressed': String(active), onclick: () => {
-      tabRules(main, { ...d, ...p });
+      // Redraw the form with the preset applied, and reopen this window on it.
+      presetRow.closest('.modal-wrap')?.querySelector('.modal-head .icon-btn')?.click();
+      tabRules(main, { ...d, ...p }, 'limits');
     } }, h('b', title), h('small', desc));
   }));
 
@@ -687,6 +689,7 @@ async function tabRules(main, draft) {
   const refresh = () => {
     conditional.forEach(([el, cond]) => el.classList.toggle('hidden', !cond()));
     fill(summary, rulesList(d).map((t) => h('li', t)));
+    drawList();
     drawPresets();
     const dirty = isDirty();
     status.textContent = dirty ? 'You have unsaved changes' : 'All changes saved';
@@ -740,7 +743,7 @@ async function tabRules(main, draft) {
             h('p.small.muted', 'Leave a text blank to use the default shown in grey.')))),
       when(() => d.pricing === 'paid',
         h('div.grid-2',
-          field('Price per vote', input(d, 'price_per_vote', 'number', { min: 0, step: 0.01 })),
+          field('Price per vote', input(d, 'price_per_vote', 'number', { min: 0, step: 0.01, id: 'rules-price' })),
           field('Currency', input(d, 'currency', 'text', { maxLength: 3, placeholder: 'PHP' }), 'Three-letter code, e.g. PHP, USD.'),
           field('Max votes in one purchase', input(d, 'max_qty_per_vote', 'number', { min: 1 }))),
         field('Payment instructions', input(d, 'payment_instructions', 'textarea', { placeholder: 'Send payment to GCash 09xx-xxx-xxxx (Juan D.). Then enter the reference number below.' })),
@@ -784,32 +787,64 @@ async function tabRules(main, draft) {
         check(d, 'show_vote_counts', 'Show the number of votes', 'Off = only the ranking bars are shown.')))),
   ];
 
+  // Each section is a row in a list; clicking it opens that section's
+  // settings in a window. Edits stay in the draft until "Save rules".
+  const SECTION_LIST = [['ballot', 'How people vote'], ['limits', 'How many votes'], ['payment', 'Free or paid'],
+    ['details', 'Voter details'], ['anticheat', 'Anti-cheat'], ['display', 'Results on the voting page']];
+  const plural = (n, w) => `${n} ${w}${Number(n) === 1 ? '' : 's'}`;
+  const sectionSummary = {
+    ballot: () => (d.voting_mode === 'criteria' ? `Rate each criterion, 1 to ${d.score_max}` : 'Pick a contestant'),
+    limits: () => [Number(d.max_votes_per_voter) > 0 ? `${plural(d.max_votes_per_voter, 'vote')} per person` : 'Unlimited votes',
+      Number(d.max_contestants_per_voter) > 0 ? `up to ${plural(d.max_contestants_per_voter, 'contestant')}` : null,
+      d.allow_repeat_contestant ? 'repeats allowed' : null].filter(Boolean).join(' · '),
+    payment: () => (d.pricing === 'paid' ? `Paid · ${money(d.price_per_vote, d.currency)} per vote`
+      : d.pricing === 'free_paid' ? `Free + paid · ${d.credits_enabled ? `${money(d.credits_price ?? 1, d.currency)} per extra vote` : 'buying off'}`
+      : 'Free'),
+    details: () => [d.require_name && 'Name', d.ask_email && 'Email', d.ask_phone && 'Mobile', String(d.extra_field_label || '').trim()]
+      .filter(Boolean).join(' · ') || 'Nothing asked',
+    anticheat: () => {
+      const on = ['limit_by_fingerprint', 'limit_by_cross_browser', 'block_bots', 'limit_by_contact', 'limit_by_name', 'limit_by_ip',
+        'desktop_only', 'block_private'].filter((k) => d[k]).length + (Number(d.max_voters_per_network) > 0 ? 1 : 0);
+      return `${plural(on, 'check')} on${Number(d.cooldown_seconds) > 0 ? ` · ${d.cooldown_seconds}s between votes` : ''}`;
+    },
+    display: () => (!d.show_live_results ? 'Standings hidden from voters' : d.show_vote_counts ? 'Live standings with vote counts' : 'Live standings, no counts'),
+  };
+  const list = h('div.rules-list', { role: 'list' });
+  function drawList() {
+    fill(list, SECTION_LIST.map(([id, label], i) => h('button.rules-row', { type: 'button', role: 'listitem', onclick: () => openSection(id) },
+      h('span.step', { 'aria-hidden': 'true' }, i + 1),
+      h('span.rules-row-text', h('b', label), h('span.small.muted', sectionSummary[id]())),
+      icon('chevron-down', 18))));
+  }
+  function openSection(id) {
+    const i = SECTION_LIST.findIndex(([k]) => k === id);
+    const done = modal(SECTION_LIST[i][1], sections[i], [{ label: 'Done', class: 'primary', value: true }], { className: 'rules-modal' });
+    done.then(refresh);
+    return done;
+  }
+  for (const sec of sections) { sec.addEventListener('input', refresh); sec.addEventListener('change', refresh); }
+
   const root = h('div.rules-page',
     header('Voting rules'),
-    h('nav.rules-jump', { 'aria-label': 'Voting rules sections' },
-      [['ballot', 'How people vote'], ['limits', 'How many votes'], ['payment', 'Free or paid'], ['details', 'Voter details'],
-        ['anticheat', 'Anti-cheat'], ['display', 'Results']].map(([id, label], i) =>
-        h('a', { href: `#rules-${id}`, onclick: (e) => { e.preventDefault(); $(`#rules-${id}`).scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, `${i + 1}. ${label}`))),
     h('div.rules-layout',
-      h('div', sections),
+      h('div', h('p.small.muted', { style: { margin: '0 0 .6rem' } }, 'Click a section to change it. Nothing is saved until you click Save rules.'), list),
       h('aside.card.rules-summary', { 'aria-label': 'What voters will see' },
         h('h2.card-title', 'What voters will see'),
         h('p.small.muted', 'Shown under "How to vote". Updates as you edit.'),
         summary)),
     h('div.savebar', status, h('div.row', discardBtn, saveBtn)));
-  root.addEventListener('input', refresh);
-  root.addEventListener('change', refresh);
   fill(main, root);
   refresh();
+  if (openId) openSection(openId);
   leaveGuard = Object.assign(
     async () => !isDirty() || confirmBox('Discard unsaved changes?', 'Your changes to the voting rules have not been saved.', 'Discard', true),
     { dirty: isDirty });
 
   async function save() {
-    const price = root.querySelector('#rules-payment input[type=number]');
+    const price = sections[2].querySelector('#rules-price');
     fieldError(price, '');
     if (d.pricing === 'paid' && !(Number(d.price_per_vote) > 0)) {
-      $('#rules-payment').scrollIntoView({ block: 'start' });
+      openSection('payment');
       fieldError(price, 'Set a price above 0 for paid votes.');
       return;
     }
