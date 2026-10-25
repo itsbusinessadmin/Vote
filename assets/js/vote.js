@@ -347,8 +347,6 @@ function openBuyCredits() {
           h('button.step-btn', { type: 'button', 'aria-label': 'One less', onclick: () => set(count() - 1) }, '−'),
           qty,
           h('button.step-btn', { type: 'button', 'aria-label': 'One more', onclick: () => set(count() + 1) }, '+'))),
-      h('div.quick-picks', [10, 50, 100].filter((n) => n <= maxQty).map((n) =>
-        h('button.quick-pick', { type: 'button', onclick: () => set(n) }, `${n} votes`))),
       h('div.credits-sum', h('span.muted', 'Total'), total),
       checkout);
     update();
