@@ -385,7 +385,7 @@ function openPurchases() {
     await refreshStatus();
     draw();
   }, 10000);
-  modal('My purchases', h('div.stack', h('p.small.muted', 'Votes you bought for this event on this device.'), list),
+  modal('My purchases', list,
     [{ label: 'Close', value: null }]);
 }
 
