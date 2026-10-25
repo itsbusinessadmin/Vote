@@ -752,7 +752,7 @@ async function tabRules(main, draft) {
       field('Max voters per internet connection', input(d, 'max_voters_per_network', 'number', { min: 0 }),
         'Stops one household or vote farm from making many "voters" on one Wi-Fi. For online voting only; at a venue everyone shares the Wi-Fi. 0 = no limit.'),
       check(d, 'desktop_only', 'Desktop and laptop computers only',
-        'Phones and tablets see a "Please use a computer" screen and cannot vote. Most people carry only one phone but rarely bring several laptops, so this limits repeat voting. Leave off for a live audience voting on their phones.'),
+        'Phones and tablets see "Voting unavailable on this device" (worded as anti-cheat) and cannot vote. Most people carry only one phone but rarely bring several laptops, so this limits repeat voting. Leave off for a live audience voting on their phones.'),
       check(d, 'block_private', 'Block private / incognito windows',
         'Incognito wipes the browser token, so blocking it removes an easy way to vote again. Detection is a best guess (mainly Chrome) and can occasionally flag a phone that is almost out of storage.')),
 

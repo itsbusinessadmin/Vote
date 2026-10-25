@@ -50,7 +50,7 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 | Same IP | Online-only events | **Don't use at a venue**: everyone on the same Wi-Fi shares one IP. |
 | Max voters per connection | One household or vote farm creating many voters | Online-only, for the same reason. 0 = off. |
 | Block private windows | Incognito, which wipes the browser token | Off by default. A best guess, mainly in Chrome. |
-| Desktop / laptop only | Voting from several phones | Off by default. Phones and tablets (including iPads) see a "Please use a computer" screen, and the database rejects their votes. |
+| Desktop / laptop only | Voting from several phones | Off by default. Phones and tablets (including iPads) see a "Voting unavailable on this device" anti-cheat screen, and the database rejects their votes. |
 | Bot blocking | Automated / headless browsers | |
 | Cooldown | Spam clicking | |
 | Admin block | Anyone you flag | |
