@@ -737,7 +737,7 @@ async function tabRules(main, draft) {
             imageUpload('Payment QR code', 'payment_qr_url', { hint: 'Voters scan this to pay. For example, your GCash / Maya / bank QR. Square, up to 900 × 900 px.', maxSide: 900 }),
             check(d, 'credits_require_receipt', 'Require a receipt screenshot',
               'Voters must upload a screenshot of their payment before sending it. Untick to hide the upload; you then confirm payments by amount and time in your GCash / Maya / bank app.'),
-            h('p.small.muted', 'Leave a text blank to use the default shown in grey.'))))),
+            h('p.small.muted', 'Leave a text blank to use the default shown in grey.')))),
       when(() => d.pricing === 'paid',
         h('div.grid-2',
           field('Price per vote', input(d, 'price_per_vote', 'number', { min: 0, step: 0.01 })),
