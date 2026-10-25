@@ -533,3 +533,7 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
   border: 2px solid color-mix(in srgb, var(--brand) 35%, transparent); }
 .qr-frame img { width: min(240px, 100%); aspect-ratio: 1; object-fit: contain; }
 @media (max-width: 420px) { .credits-notice .btn { width: 100%; } }
+.confirm-note { display: flex; gap: .6rem; align-items: flex-start; margin: 0; padding: .75rem .9rem; border-radius: 14px;
+  font-size: .9rem; font-weight: 700; color: var(--warn-ink);
+  background: color-mix(in srgb, var(--warn) 14%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+.confirm-note .icon { margin-top: .1rem; }
