@@ -436,7 +436,8 @@ function openBuyCredits() {
   const payStep = (n) => {
     if (n < 1) return;
     let proofFile = null;
-    const ref = h('input#credits-ref', { type: 'text', placeholder: 'e.g. GCash reference no.', autocomplete: 'off' });
+    const ref = h('input#credits-ref', { type: 'text', placeholder: 'Payment reference no. (e.g. GCash)', autocomplete: 'off',
+      'aria-label': 'Payment reference number' });
     const proofName = h('span.muted.small#credits-proof-name', { 'aria-live': 'polite' }, 'No file chosen');
     const proofInput = h('input', { type: 'file', accept: 'image/*', class: 'hidden', tabIndex: -1, onchange: (e) => {
       proofFile = e.target.files[0] || null;
@@ -480,7 +481,7 @@ function openBuyCredits() {
       event.payment_qr_url
         ? h('div.qr-frame', h('img', { src: event.payment_qr_url, alt: 'Payment QR code' }), h('small', 'Scan with GCash, Maya or your bank app'))
         : h('p.notice', 'The organizer has not added a payment QR code yet.'),
-      h('label.field', { for: 'credits-ref' }, h('span', 'Payment reference number'), ref),
+      h('div.field', ref),
       h('div.row',
         h('button.btn.sm', { type: 'button', 'aria-describedby': 'credits-proof-name', onclick: () => proofInput.click() }, icon('upload', 16), 'Upload receipt'),
         proofInput, proofName),
