@@ -217,7 +217,7 @@ function render() {
   // Free + paid: a small Buy button sits beside "0 votes left".
   const canBuy = event.pricing === 'free_paid' && event.credits_enabled !== false && state.open && !myStatus?.blocked && remaining === 0;
   const buyPill = () => canBuy ? h('button.buy-pill', { type: 'button', onclick: openBuyCredits },
-    icon('shopping-bag', 14), event.credits_button || CREDITS_DEFAULTS.button) : null;
+    event.credits_button || CREDITS_DEFAULTS.button) : null;
 
   const head = h('section.event-head',
     h('div.event-card',
