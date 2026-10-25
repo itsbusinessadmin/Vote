@@ -580,6 +580,14 @@ begin
     'credits', v_credits,
     'credits_pending', coalesce((select sum(quantity) from public.credit_purchases
                                   where event_id = e.id and voter_id = any (v_ids) and status = 'pending'), 0),
+    -- This person's own purchases, newest first, so they can see each one's status.
+    'purchases', coalesce((
+      select jsonb_agg(jsonb_build_object('id', id, 'quantity', quantity, 'amount', amount, 'status', status,
+                                          'payment_ref', payment_ref, 'created_at', created_at, 'reviewed_at', reviewed_at)
+                       order by created_at desc)
+        from (select * from public.credit_purchases
+               where event_id = e.id and voter_id = any (v_ids)
+               order by created_at desc limit 30) p), '[]'::jsonb),
     'remaining', case when e.max_votes_per_voter > 0 then greatest(e.max_votes_per_voter + v_credits - v_used, 0) end,
     'blocked', exists (select 1 from public.voters where id = any (v_ids) and blocked),
     'votes', coalesce((

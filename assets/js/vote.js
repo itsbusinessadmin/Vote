@@ -284,17 +284,28 @@ function render() {
         empty.hidden = cards.some((c) => !c.hidden);
       } })) : null;
 
-  // Shown above the contestants once this voter has used every vote, and
-  // while a credit payment is waiting for the organizer.
+  // Shown above the contestants once this voter has used every vote, while a
+  // credit payment is waiting, and whenever they have bought credits (so the
+  // purchases button stays reachable).
   const credits = event.pricing === 'free_paid' && event.credits_enabled !== false && state.open && !myStatus?.blocked;
   const pending = Number(myStatus?.credits_pending) || 0;
-  const creditsNotice = credits && (remaining === 0 || pending > 0) ? h('div.credits-notice', { role: 'status' },
+  const purchases = myStatus?.purchases || [];
+  const noticeText = remaining === 0
+    ? [event.credits_title || CREDITS_DEFAULTS.title, event.credits_message || CREDITS_DEFAULTS.message]
+    : pending ? ['Payment sent', 'Your extra votes are added here once the organizer confirms.']
+    : [`You have ${plural(remaining ?? 0, 'vote')} left`, 'This includes the votes you bought.'];
+  const creditsNotice = credits && (remaining === 0 || pending > 0 || purchases.length) ? h('div.credits-notice', { role: 'status' },
     h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 24)),
     h('div.credits-text',
-      h('b', remaining === 0 ? event.credits_title || CREDITS_DEFAULTS.title : 'Payment sent'),
-      h('span', remaining === 0 ? event.credits_message || CREDITS_DEFAULTS.message : 'Your extra votes are added here once the organizer confirms.'),
+      h('b', noticeText[0]),
+      h('span', noticeText[1]),
       pending ? h('span.pending-chip', icon('clock', 14), `${plural(pending, 'vote')} waiting for confirmation`) : null),
-    h('button.btn.primary.sm', { type: 'button', onclick: openBuyCredits }, icon('shopping-bag', 16), event.credits_button || CREDITS_DEFAULTS.button)) : null;
+    h('div.credits-actions',
+      purchases.length ? h('button.notify-btn', { type: 'button', onclick: openPurchases,
+        'aria-label': `My purchases${pending ? `, ${purchases.filter((p) => p.status === 'pending').length} pending` : ''}` },
+        icon('bell', 20),
+        pending ? h('span.notify-dot', { 'aria-hidden': 'true' }, purchases.filter((p) => p.status === 'pending').length) : null) : null,
+      h('button.btn.primary.sm', { type: 'button', onclick: openBuyCredits }, icon('shopping-bag', 16), event.credits_button || CREDITS_DEFAULTS.button))) : null;
 
   const content = view === 'standings'
     ? h('section.standings-view', h('div#results',
@@ -330,6 +341,42 @@ async function loadResults() {
   if (!data || !box) return;
   lastResults = data;
   fill(box, standingsView(data));
+}
+
+// ---------------------------------------------------------------------
+// My purchases: every credit purchase from this voter and its status
+// ---------------------------------------------------------------------
+const PURCHASE_STATUS = {
+  pending: ['Pending', 'clock', 'Waiting for the organizer to confirm your payment.'],
+  approved: ['Confirmed', 'check', 'Votes added. You can use them now.'],
+  rejected: ['Refused', 'x', 'The organizer could not confirm this payment. Contact them if you think this is a mistake.'],
+};
+
+function openPurchases() {
+  const list = h('div.purchase-list');
+  const draw = () => {
+    const items = myStatus?.purchases || [];
+    fill(list, items.length ? items.map((p) => {
+      const [label, ic, help] = PURCHASE_STATUS[p.status] || PURCHASE_STATUS.pending;
+      return h('div.purchase', { class: p.status },
+        h('span.purchase-icon', { 'aria-hidden': 'true' }, icon(ic, 18)),
+        h('div.purchase-main',
+          h('div.purchase-top', h('b', plural(p.quantity, 'vote')), h('span.purchase-status', label)),
+          h('div.muted.small', [money(p.amount, event.currency), p.payment_ref ? `Ref ${p.payment_ref}` : null,
+            new Date(p.created_at).toLocaleString()].filter(Boolean).join(' · ')),
+          h('div.small.purchase-help', help)));
+    }) : h('p.muted', 'No purchases yet.'));
+  };
+  draw();
+  // Keep the list current while it is open.
+  const timer = setInterval(async () => {
+    if (!list.isConnected) return clearInterval(timer);
+    if (document.hidden) return;
+    await refreshStatus();
+    draw();
+  }, 10000);
+  modal('My purchases', h('div.stack', h('p.small.muted', 'Votes you bought for this event on this device.'), list),
+    [{ label: 'Close', value: null }]);
 }
 
 // ---------------------------------------------------------------------
