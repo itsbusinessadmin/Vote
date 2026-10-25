@@ -492,3 +492,18 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
   .glass, .card, .modal, .side, .savebar, .topbar, .page-head, .modal-wrap, .toast, .event-card, .group { -webkit-backdrop-filter: none; backdrop-filter: none; }
   body::before { display: none; }
 }
+
+/* ----- voting page: out of votes, buy credits ----- */
+.credits-notice { display: flex; align-items: center; gap: .85rem; flex-wrap: wrap; margin-bottom: 1rem; padding: .85rem 1rem;
+  border-radius: 18px; border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
+  background: color-mix(in srgb, var(--brand) 10%, var(--glass)); box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); animation: sheet-in .35s var(--ease); }
+.credits-icon { flex: none; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--brand); color: var(--brand-ink); box-shadow: 0 6px 16px color-mix(in srgb, var(--brand) 35%, transparent); }
+.credits-text { flex: 1; min-width: 180px; display: grid; gap: .1rem; }
+.credits-text b { font-size: .98rem; }
+.credits-text span { color: var(--muted); font-size: .86rem; }
+.credits-notice .btn { white-space: nowrap; }
+.credits-hero { display: flex; align-items: center; gap: .8rem; }
+.credits-qr { max-width: 220px; margin: 0 auto; border-radius: 10px; background: #fff; }
+@media (max-width: 420px) { .credits-notice .btn { width: 100%; } }

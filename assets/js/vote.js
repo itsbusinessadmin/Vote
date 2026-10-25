@@ -266,10 +266,20 @@ function render() {
         empty.hidden = cards.some((c) => !c.hidden);
       } })) : null;
 
+  // Shown above the contestants once this voter has used every vote.
+  const outOfVotes = state.open && !myStatus?.blocked && remaining === 0;
+  const creditsNotice = outOfVotes ? h('div.credits-notice', { role: 'status' },
+    h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 24)),
+    h('div.credits-text',
+      h('b', "You've used all your votes"),
+      h('span', 'Buy vote credits to keep supporting your favorites.')),
+    h('button.btn.primary.sm', { type: 'button', onclick: openBuyCredits }, icon('shopping-bag', 16), 'Buy credits')) : null;
+
   const content = view === 'standings'
     ? h('section.standings-view', h('div#results',
       lastResults ? standingsView(lastResults) : h('div.spinner', { role: 'status', 'aria-label': 'Loading' })))
     : h('section',
+      creditsNotice,
       search,
       contestants.length ? h('div.contestants', cards) : h('p.muted.empty', 'Contestants will appear here soon.'),
       empty);
@@ -300,6 +310,22 @@ async function loadResults() {
   if (!data || !box) return;
   lastResults = data;
   fill(box, standingsView(data));
+}
+
+// ---------------------------------------------------------------------
+// Buy credits pop-up: how to pay the organizer for more votes
+// ---------------------------------------------------------------------
+function openBuyCredits() {
+  const price = Number(event.price_per_vote) > 0 ? money(event.price_per_vote, event.currency) : null;
+  modal('Buy vote credits', h('div.stack',
+    h('div.credits-hero', h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 28)),
+      h('div', h('b', 'Get more votes'), price ? h('div.muted.small', `${price} per vote`) : null)),
+    event.payment_instructions
+      ? h('p.small', { style: { whiteSpace: 'pre-line' } }, event.payment_instructions)
+      : h('p.small.muted', 'Contact the organizer to buy more vote credits.'),
+    event.payment_qr_url ? h('img.credits-qr', { src: event.payment_qr_url, alt: 'Payment QR code' }) : null,
+    h('p.small.muted', 'Your extra votes are added once the organizer confirms your payment.')),
+  [{ label: 'Close', value: null }]);
 }
 
 // ---------------------------------------------------------------------
