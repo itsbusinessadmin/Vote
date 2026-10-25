@@ -504,6 +504,36 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
 .credits-text b { font-size: .98rem; }
 .credits-text span { color: var(--muted); font-size: .86rem; }
 .credits-notice .btn { white-space: nowrap; }
+.credits { display: grid; gap: .9rem; }
 .credits-hero { display: flex; align-items: center; gap: .8rem; }
-.credits-qr { max-width: 220px; margin: 0 auto; border-radius: 10px; background: #fff; }
+.rate-chip { justify-self: start; display: inline-flex; align-items: center; gap: .5rem; padding: .45rem .9rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--brand) 12%, transparent); color: var(--brand-text); font-weight: 800; font-size: 1rem; }
+.rate-chip i { font-style: normal; opacity: .6; }
+.qty-stepper { display: grid; grid-template-columns: 48px 1fr 48px; gap: .5rem; align-items: center; }
+.qty-stepper input[type=number] { text-align: center; font-size: 1.4rem; font-weight: 800; padding: .5rem; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.qty-stepper input::-webkit-outer-spin-button, .qty-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.step-btn { height: 48px; border: 0; border-radius: 14px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 1.4rem; font-weight: 700; cursor: pointer;
+  transition: transform .15s var(--ease); }
+.step-btn:active { transform: scale(.92); }
+.quick-picks { display: flex; gap: .4rem; flex-wrap: wrap; }
+.quick-pick { border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: .85rem; font-weight: 600;
+  padding: .35rem .8rem; border-radius: 999px; cursor: pointer; }
+.quick-pick:hover { border-color: var(--brand); color: var(--brand-text); }
+.credits-sum { display: flex; justify-content: space-between; align-items: baseline; padding-top: .6rem; border-top: 1px dashed var(--border); }
+.credits-total { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.checkout-btn { display: flex; align-items: center; justify-content: center; gap: .55rem; width: 100%; min-height: 54px; border: 0; border-radius: 999px; cursor: pointer;
+  font: inherit; font-weight: 800; font-size: 1.05rem; color: #fff;
+  background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #ec4899));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--brand) 40%, transparent), inset 0 1px 0 rgba(255, 255, 255, .35);
+  animation: checkout-pop .45s cubic-bezier(.34, 1.56, .64, 1); transition: transform .18s var(--ease), box-shadow .18s; }
+.checkout-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 30px color-mix(in srgb, var(--brand) 50%, transparent), inset 0 1px 0 rgba(255, 255, 255, .35); }
+.checkout-btn:active { transform: scale(.97); }
+.checkout-btn .checkout-arrow { transition: transform .2s var(--ease); }
+.checkout-btn:hover .checkout-arrow { transform: translateX(4px); }
+@keyframes checkout-pop { from { opacity: 0; transform: translateY(10px) scale(.9); } }
+.pay-summary { display: flex; justify-content: space-between; align-items: baseline; padding: .75rem 1rem; border-radius: 14px; background: var(--surface-2); }
+.pay-summary b { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.qr-frame { display: grid; justify-items: center; gap: .5rem; padding: 1rem; border-radius: 20px; background: #fff; color: #444;
+  border: 2px solid color-mix(in srgb, var(--brand) 35%, transparent); }
+.qr-frame img { width: min(240px, 100%); aspect-ratio: 1; object-fit: contain; }
 @media (max-width: 420px) { .credits-notice .btn { width: 100%; } }

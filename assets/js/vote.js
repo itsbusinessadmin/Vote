@@ -316,16 +316,62 @@ async function loadResults() {
 // Buy credits pop-up: how to pay the organizer for more votes
 // ---------------------------------------------------------------------
 function openBuyCredits() {
-  const price = Number(event.price_per_vote) > 0 ? money(event.price_per_vote, event.currency) : null;
-  modal('Buy vote credits', h('div.stack',
-    h('div.credits-hero', h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 28)),
-      h('div', h('b', 'Get more votes'), price ? h('div.muted.small', `${price} per vote`) : null)),
-    event.payment_instructions
-      ? h('p.small', { style: { whiteSpace: 'pre-line' } }, event.payment_instructions)
-      : h('p.small.muted', 'Contact the organizer to buy more vote credits.'),
-    event.payment_qr_url ? h('img.credits-qr', { src: event.payment_qr_url, alt: 'Payment QR code' }) : null,
-    h('p.small.muted', 'Your extra votes are added once the organizer confirms your payment.')),
-  [{ label: 'Close', value: null }]);
+  const price = Number(event.price_per_vote) > 0 ? Number(event.price_per_vote) : 1;
+  const maxQty = Math.max(1, Number(event.max_qty_per_vote) || 1000);
+  const box = h('div.credits');
+
+  // Step 1: choose how many votes. The checkout button appears once a number is typed.
+  const pickStep = () => {
+    const qty = h('input#credits-qty', { type: 'number', min: 1, max: maxQty, step: 1, inputMode: 'numeric', placeholder: '0',
+      'aria-label': 'Number of votes to buy' });
+    const total = h('b.credits-total', money(0, event.currency));
+    const checkout = h('button.checkout-btn', { type: 'button', hidden: true, onclick: () => payStep(count()) },
+      icon('shopping-bag', 18), h('span.checkout-label'), h('span.checkout-arrow', { 'aria-hidden': 'true' }, '→'));
+    const count = () => Math.min(maxQty, Math.max(0, Math.floor(Number(qty.value) || 0)));
+    const update = () => {
+      const n = count();
+      total.textContent = money(n * price, event.currency);
+      checkout.hidden = n < 1;
+      checkout.querySelector('.checkout-label').textContent = `Checkout ${n} vote${n === 1 ? '' : 's'}`;
+    };
+    const set = (n) => { qty.value = Math.min(maxQty, Math.max(1, n)); update(); qty.focus(); };
+    qty.addEventListener('input', update);
+    qty.addEventListener('keydown', (e) => { if (e.key === 'Enter' && count() > 0) payStep(count()); });
+
+    fill(box,
+      h('div.credits-hero', h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 26)),
+        h('div', h('b', 'Get more votes'), h('div.muted.small', 'Keep supporting your favorites'))),
+      h('div.rate-chip', h('span', money(price, event.currency)), h('i', { 'aria-hidden': 'true' }, '='), h('span', '1 vote')),
+      h('label.field', { for: 'credits-qty' }, h('span', 'How many votes would you like to buy?'),
+        h('div.qty-stepper',
+          h('button.step-btn', { type: 'button', 'aria-label': 'One less', onclick: () => set(count() - 1) }, '−'),
+          qty,
+          h('button.step-btn', { type: 'button', 'aria-label': 'One more', onclick: () => set(count() + 1) }, '+'))),
+      h('div.quick-picks', [10, 50, 100].filter((n) => n <= maxQty).map((n) =>
+        h('button.quick-pick', { type: 'button', onclick: () => set(n) }, `${n} votes`))),
+      h('div.credits-sum', h('span.muted', 'Total'), total),
+      checkout);
+    update();
+    qty.focus();
+  };
+
+  // Step 2: pay the total by scanning the organizer's QR code.
+  const payStep = (n) => {
+    if (n < 1) return;
+    fill(box,
+      h('button.btn.sm.ghost', { type: 'button', onclick: pickStep }, '← Change amount'),
+      h('div.pay-summary',
+        h('span.muted.small', `${n} vote${n === 1 ? '' : 's'}`),
+        h('b', money(n * price, event.currency))),
+      event.payment_qr_url
+        ? h('div.qr-frame', h('img', { src: event.payment_qr_url, alt: 'Payment QR code' }), h('small', 'Scan with GCash, Maya or your bank app'))
+        : h('p.notice', 'The organizer has not added a payment QR code yet.'),
+      event.payment_instructions ? h('p.small', { style: { whiteSpace: 'pre-line' } }, event.payment_instructions) : null,
+      h('p.small.muted', 'Your extra votes are added once the organizer confirms your payment.'));
+  };
+
+  pickStep();
+  modal('Buy vote credits', box, [{ label: 'Close', value: null }]);
 }
 
 // ---------------------------------------------------------------------
