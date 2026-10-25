@@ -199,6 +199,33 @@ create table if not exists public.vote_attempts (
 );
 create index if not exists vote_attempts_event_idx on public.vote_attempts (event_id, created_at desc);
 
+-- Vote credits bought in "free + paid" events. A purchase belongs to the
+-- voter row of the device that bought it. Approved credits raise the vote
+-- limit for every voter row the anti-cheat treats as the same person
+-- (same browser token, fingerprint, computer, contact...), exactly the
+-- rows whose votes count against that person's limit.
+create table if not exists public.credit_purchases (
+  id            uuid primary key default gen_random_uuid(),
+  event_id      uuid not null references public.events (id) on delete cascade,
+  voter_id      uuid not null references public.voters (id) on delete cascade,
+  quantity      int  not null check (quantity > 0),
+  amount        numeric(12, 2) not null default 0,
+  payment_ref   text,
+  proof_path    text,
+  status        text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  fingerprint   text,
+  device_token  text,
+  ip            text,
+  user_agent    text,
+  created_at    timestamptz not null default now(),
+  reviewed_at   timestamptz
+);
+create index if not exists credit_purchases_event_idx on public.credit_purchases (event_id, status);
+create index if not exists credit_purchases_voter_idx on public.credit_purchases (voter_id, status);
+
+-- Votes cast with bought credits (after the free votes ran out).
+alter table public.votes add column if not exists from_credits boolean not null default false;
+
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
 begin new.updated_at := now(); return new; end;
@@ -217,6 +244,7 @@ alter table public.criteria      enable row level security;
 alter table public.voters        enable row level security;
 alter table public.votes         enable row level security;
 alter table public.vote_attempts enable row level security;
+alter table public.credit_purchases enable row level security;
 
 drop policy if exists admins_self on public.admins;
 create policy admins_self on public.admins for select using (user_id = auth.uid());
@@ -245,6 +273,9 @@ drop policy if exists votes_admin on public.votes;
 create policy votes_admin on public.votes for all using (public.is_admin()) with check (public.is_admin());
 drop policy if exists attempts_admin on public.vote_attempts;
 create policy attempts_admin on public.vote_attempts for all using (public.is_admin()) with check (public.is_admin());
+-- Credit purchases: admin only. Voters buy through buy_credits().
+drop policy if exists credits_admin on public.credit_purchases;
+create policy credits_admin on public.credit_purchases for all using (public.is_admin()) with check (public.is_admin());
 
 -- ---------------------------------------------------------------------
 -- Helpers
@@ -313,6 +344,14 @@ returns uuid[] language sql stable security definer set search_path = public as 
   ) m;
 $$;
 
+-- Approved vote credits for these voter rows (free + paid events only).
+create or replace function public._approved_credits(e public.events, p_ids uuid[])
+returns int language sql stable security definer set search_path = public as $$
+  select case when e.pricing <> 'free_paid' then 0 else coalesce((
+    select sum(quantity) from public.credit_purchases
+     where event_id = e.id and voter_id = any (p_ids) and status = 'approved'), 0)::int end;
+$$;
+
 -- ---------------------------------------------------------------------
 -- Public: cast a vote
 --   p_voter = { name, email, phone, extra, fingerprint, device_token,
@@ -344,6 +383,9 @@ declare
   v_ids      uuid[];
   v_voter_id uuid;
   v_used     int;
+  v_credits  int := 0;
+  v_limit    int;
+  v_on_credit boolean := false;
   v_distinct int;
   v_last     timestamptz;
   v_status   text;
@@ -435,21 +477,30 @@ begin
         into v_used, v_distinct, v_last
         from public.votes where voter_id = any (v_ids) and status <> 'rejected';
 
+      -- Free + paid: approved credits add to the free votes. Once the free
+      -- votes are used up, each vote spends a credit, and credit votes may
+      -- go to any contestant, including one already voted for.
+      v_credits := public._approved_credits(e, v_ids);
+      v_limit := e.max_votes_per_voter + v_credits;
+      v_on_credit := e.pricing = 'free_paid' and e.max_votes_per_voter > 0 and v_used >= e.max_votes_per_voter;
+
       if cardinality(v_ids) = 0 and e.max_voters_per_network > 0 and v_ip <> '' and (
             select count(*) from public.voters
              where event_id = e.id and public._ip_conn(ip) = public._ip_conn(v_ip)) >= e.max_voters_per_network then
         v_code := 'NETWORK_LIMIT'; v_msg := 'Too many people have already voted from this internet connection.';
       elsif e.cooldown_seconds > 0 and v_last is not null and now() - v_last < make_interval(secs => e.cooldown_seconds) then
         v_code := 'TOO_FAST'; v_msg := 'Please wait a few seconds before voting again.';
-      elsif e.max_votes_per_voter > 0 and v_used + v_qty > e.max_votes_per_voter then
+      elsif e.max_votes_per_voter > 0 and v_used + v_qty > v_limit then
         v_code := 'LIMIT_REACHED';
-        v_msg := case when v_used >= e.max_votes_per_voter
-                      then 'You have already used all your votes on this device.'
-                      else 'You only have ' || (e.max_votes_per_voter - v_used) || ' vote(s) left.' end;
-      elsif not e.allow_repeat_contestant and exists (
+        v_msg := case when v_used < v_limit
+                      then 'You only have ' || (v_limit - v_used) || ' vote(s) left.'
+                      when e.pricing = 'free_paid' and e.credits_enabled
+                      then 'You have used all your votes. Buy more votes to keep voting.'
+                      else 'You have already used all your votes on this device.' end;
+      elsif not v_on_credit and not e.allow_repeat_contestant and exists (
               select 1 from public.votes where voter_id = any (v_ids) and contestant_id = p_contestant_id and status <> 'rejected') then
         v_code := 'ALREADY_VOTED'; v_msg := 'You have already voted for this contestant.';
-      elsif e.max_contestants_per_voter > 0 and v_distinct >= e.max_contestants_per_voter and not exists (
+      elsif not v_on_credit and e.max_contestants_per_voter > 0 and v_distinct >= e.max_contestants_per_voter and not exists (
               select 1 from public.votes where voter_id = any (v_ids) and contestant_id = p_contestant_id and status <> 'rejected') then
         v_code := 'CONTESTANT_LIMIT';
         v_msg := 'You can only vote for ' || e.max_contestants_per_voter || ' contestant(s).';
@@ -484,14 +535,14 @@ begin
 
   v_status := case when e.pricing = 'paid' then 'pending' else 'approved' end;
 
-  insert into public.votes (event_id, contestant_id, voter_id, quantity, status, amount, payment_ref, proof_path, scores, ip)
+  insert into public.votes (event_id, contestant_id, voter_id, quantity, status, amount, payment_ref, proof_path, scores, ip, from_credits)
   values (e.id, p_contestant_id, v_voter_id, v_qty, v_status,
           case when e.pricing = 'paid' then v_qty * e.price_per_vote end,
-          nullif(left(trim(coalesce(p_payment_ref, '')), 120), ''), nullif(p_proof_path, ''), v_scores, v_ip);
+          nullif(left(trim(coalesce(p_payment_ref, '')), 120), ''), nullif(p_proof_path, ''), v_scores, v_ip, v_on_credit);
 
   return jsonb_build_object(
     'ok', true, 'code', 'OK', 'status', v_status,
-    'remaining', case when e.max_votes_per_voter > 0 then e.max_votes_per_voter - v_used - v_qty end);
+    'remaining', case when e.max_votes_per_voter > 0 then v_limit - v_used - v_qty end);
 end;
 $$;
 
@@ -504,6 +555,7 @@ declare
   e     public.events;
   v_ids uuid[];
   v_used int;
+  v_credits int;
 begin
   select * into e from public.events where id = p_event_id and status <> 'draft';
   if not found then return null; end if;
@@ -520,10 +572,15 @@ begin
 
   select coalesce(sum(quantity), 0) into v_used
     from public.votes where voter_id = any (v_ids) and status <> 'rejected';
+  v_credits := public._approved_credits(e, v_ids);
 
   return jsonb_build_object(
     'used', v_used,
-    'remaining', case when e.max_votes_per_voter > 0 then greatest(e.max_votes_per_voter - v_used, 0) end,
+    'free_votes', e.max_votes_per_voter,
+    'credits', v_credits,
+    'credits_pending', coalesce((select sum(quantity) from public.credit_purchases
+                                  where event_id = e.id and voter_id = any (v_ids) and status = 'pending'), 0),
+    'remaining', case when e.max_votes_per_voter > 0 then greatest(e.max_votes_per_voter + v_credits - v_used, 0) end,
     'blocked', exists (select 1 from public.voters where id = any (v_ids) and blocked),
     'votes', coalesce((
       select jsonb_agg(jsonb_build_object('contestant_id', contestant_id, 'quantity', q, 'status', s))
@@ -531,6 +588,81 @@ begin
                    case when bool_or(status = 'approved') then 'approved' else 'pending' end s
               from public.votes where voter_id = any (v_ids) and status <> 'rejected'
              group by contestant_id) t), '[]'::jsonb));
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Public: buy vote credits (free + paid events)
+--   The purchase is tied to this device's voter row, found the same way
+--   cast_vote finds it, so approved credits show up on this device.
+-- Returns { ok, code, message? }
+-- ---------------------------------------------------------------------
+create or replace function public.buy_credits(
+  p_event_id    uuid,
+  p_voter       jsonb,
+  p_quantity    int,
+  p_payment_ref text default null,
+  p_proof_path  text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  e        public.events;
+  v_ip     text := public._client_ip();
+  v_fp     text := left(coalesce(p_voter ->> 'fingerprint', ''), 128);
+  v_cross  text := left(coalesce(p_voter ->> 'cross_id', ''), 128);
+  v_tok    text := left(coalesce(p_voter ->> 'device_token', ''), 128);
+  v_ua     text := left(coalesce(p_voter ->> 'user_agent', ''), 400);
+  v_ref    text := nullif(left(trim(coalesce(p_payment_ref, '')), 120), '');
+  v_proof  text := nullif(p_proof_path, '');
+  v_qty    int  := coalesce(p_quantity, 0);
+  v_ids    uuid[];
+  v_voter  uuid;
+begin
+  select * into e from public.events where id = p_event_id;
+  if not found or e.status = 'draft' then
+    return jsonb_build_object('ok', false, 'code', 'EVENT_NOT_FOUND', 'message', 'This event does not exist.');
+  end if;
+  perform pg_advisory_xact_lock(hashtext(e.id::text));
+
+  if e.pricing <> 'free_paid' or not e.credits_enabled then
+    return jsonb_build_object('ok', false, 'code', 'CREDITS_OFF', 'message', 'This event does not sell extra votes.');
+  elsif e.status <> 'open' or (e.ends_at is not null and now() > e.ends_at) then
+    return jsonb_build_object('ok', false, 'code', 'VOTING_CLOSED', 'message', 'Voting is closed.');
+  elsif length(v_fp) < 16 or length(v_tok) < 16 then
+    return jsonb_build_object('ok', false, 'code', 'NO_DEVICE', 'message', 'Your browser could not be verified. Please enable JavaScript and storage, then reload.');
+  elsif v_qty < 1 or v_qty > e.max_qty_per_vote then
+    return jsonb_build_object('ok', false, 'code', 'BAD_QUANTITY', 'message', 'Choose between 1 and ' || e.max_qty_per_vote || ' votes.');
+  elsif v_ref is null and v_proof is null then
+    return jsonb_build_object('ok', false, 'code', 'PAYMENT_REQUIRED', 'message', 'Enter your payment reference number or upload a receipt.');
+  end if;
+
+  v_ids := public._matching_voters(e, v_fp, v_tok, v_ip,
+    public._norm(p_voter ->> 'name'), left(lower(trim(coalesce(p_voter ->> 'email', ''))), 120),
+    public._norm_phone(p_voter ->> 'phone'), v_cross);
+
+  if exists (select 1 from public.voters where id = any (v_ids) and blocked) then
+    return jsonb_build_object('ok', false, 'code', 'BLOCKED', 'message', 'This device or voter has been blocked by the organizer.');
+  end if;
+
+  -- Prefer this exact browser's voter row; otherwise the matching row seen first.
+  select id into v_voter from public.voters
+   where event_id = e.id and device_token = v_tok order by created_at limit 1;
+  if v_voter is null then
+    select id into v_voter from public.voters where id = any (v_ids) order by created_at limit 1;
+  end if;
+  if v_voter is null then
+    return jsonb_build_object('ok', false, 'code', 'NO_VOTER', 'message', 'Use your free votes first, then buy more.');
+  end if;
+
+  if (select count(*) from public.credit_purchases where voter_id = any (v_ids) and status = 'pending') >= 5 then
+    return jsonb_build_object('ok', false, 'code', 'TOO_MANY_PENDING',
+      'message', 'You already have 5 payments waiting for confirmation. Please wait for the organizer to review them.');
+  end if;
+
+  insert into public.credit_purchases (event_id, voter_id, quantity, amount, payment_ref, proof_path, fingerprint, device_token, ip, user_agent)
+  values (e.id, v_voter, v_qty, v_qty * e.credits_price, v_ref, v_proof, v_fp, v_tok, v_ip, v_ua);
+  update public.voters set last_seen_at = now() where id = v_voter;
+
+  return jsonb_build_object('ok', true, 'code', 'OK');
 end;
 $$;
 
@@ -618,6 +750,7 @@ create or replace function public.reset_event_votes(p_event_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   if not public.is_admin() then raise exception 'not authorized'; end if;
+  delete from public.credit_purchases where event_id = p_event_id;
   delete from public.votes where event_id = p_event_id;
   delete from public.voters where event_id = p_event_id;
   delete from public.vote_attempts where event_id = p_event_id;
@@ -628,6 +761,8 @@ $$;
 revoke all on function public._matching_voters(public.events, text, text, text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.cast_vote(uuid, uuid, jsonb, int, jsonb, text, text) to anon, authenticated;
 grant execute on function public.my_vote_status(uuid, jsonb) to anon, authenticated;
+grant execute on function public.buy_credits(uuid, jsonb, int, text, text) to anon, authenticated;
+revoke all on function public._approved_credits(public.events, uuid[]) from public, anon, authenticated;
 grant execute on function public.get_results(uuid) to anon, authenticated;
 grant execute on function public.claim_admin() to authenticated;
 grant execute on function public.reset_event_votes(uuid) to authenticated;

@@ -153,7 +153,9 @@ async function fetchAll(build) {
 
 async function countPending() {
   if (!ev) return;
-  const { count } = await sb.from('votes').select('id', { count: 'exact', head: true }).eq('event_id', ev.id).eq('status', 'pending');
+  const { count } = ev.pricing === 'free_paid'
+    ? await sb.from('credit_purchases').select('id', { count: 'exact', head: true }).eq('event_id', ev.id).eq('status', 'pending')
+    : await sb.from('votes').select('id', { count: 'exact', head: true }).eq('event_id', ev.id).eq('status', 'pending');
   if ((count || 0) !== pendingCount) { pendingCount = count || 0; renderSide(); }
 }
 
@@ -830,6 +832,7 @@ async function tabRules(main, draft) {
 // Tab: Payments
 // ---------------------------------------------------------------------
 async function tabPayments(main) {
+  if (ev.pricing === 'free_paid') return tabCreditPayments(main);
   const filter = localStorage.getItem('pay_filter') || 'pending';
   const [rows, allPaid] = await Promise.all([
     fetchAll(() => {
@@ -863,7 +866,7 @@ async function tabPayments(main) {
       filter === 'pending' && rows.length ? h('button.btn.ok.sm', { onclick: async () => {
         if (await confirmBox('Approve all?', `Approve all ${rows.length} pending payments?`, 'Approve all')) review(rows.map((r) => r.id), 'approved');
       } }, 'Approve all') : null),
-    ev.pricing !== 'paid' ? h('div.card.section', h('p.muted', 'This event uses free voting. Switch Pricing to "Paid" in Voting rules to accept paid votes.')) : null,
+    ev.pricing === 'free' ? h('div.card.section', h('p.muted', 'This event uses free voting. Choose "Paid per vote" or "Free + paid" in Voting rules to accept payments.')) : null,
     h('div.stats',
       stat(money(sum('approved'), ev.currency), 'Approved total'),
       stat(money(sum('pending'), ev.currency), 'Awaiting review'),
@@ -891,6 +894,71 @@ async function tabPayments(main) {
 
 const stat = (value, label) => h('div.stat', h('b', value), h('span', label));
 
+// Payments for "Free + paid" events: voters who used their free votes and
+// bought more. Approving a purchase adds its votes to that voter right away;
+// their page picks it up within seconds.
+async function tabCreditPayments(main) {
+  const filter = localStorage.getItem('pay_filter') || 'pending';
+  const all = await fetchAll(() => sb.from('credit_purchases')
+    .select('*, voters(name,email,phone,extra,device_info,fingerprint,ip)')
+    .eq('event_id', ev.id).order('created_at', { ascending: false }).order('id'));
+  const rows = filter === 'all' ? all : all.filter((r) => r.status === filter);
+  const sum = (st) => all.filter((r) => r.status === st).reduce((a, r) => a + Number(r.amount), 0);
+  const votesOf = (st) => all.filter((r) => r.status === st).reduce((a, r) => a + r.quantity, 0);
+
+  const paths = rows.slice(0, PAGE).filter((r) => r.proof_path).map((r) => r.proof_path);
+  const signed = {};
+  if (paths.length) {
+    const { data } = await sb.storage.from('proofs').createSignedUrls(paths, 3600);
+    (data || []).forEach((x) => { if (x.signedUrl) signed[x.path] = x.signedUrl; });
+  }
+
+  const review = async (ids, status) => {
+    const { error } = await sb.from('credit_purchases').update({ status, reviewed_at: new Date().toISOString() }).in('id', ids);
+    if (error) return toast(error.message, 'error');
+    toast(status === 'approved' ? 'Approved. The votes are added to that voter now.' : 'Rejected', status === 'approved' ? 'success' : 'info');
+    countPending();
+    renderTab();
+  };
+
+  const filterSel = select({ f: filter }, 'f', [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']]);
+  filterSel.setAttribute('aria-label', 'Show payments');
+  filterSel.addEventListener('change', (e) => { localStorage.setItem('pay_filter', e.target.value); renderTab(); });
+
+  fill(main,
+    header('Payments',
+      filterSel,
+      filter === 'pending' && rows.length ? h('button.btn.ok.sm', { onclick: async () => {
+        if (await confirmBox('Approve all?', `Approve all ${rows.length} pending purchases? Their votes are added right away.`, 'Approve all')) review(rows.map((r) => r.id), 'approved');
+      } }, 'Approve all') : null),
+    h('p.small.muted.section', 'Votes bought by voters who used up their free votes. Check each payment in your GCash / Maya / bank app, then approve it. The votes go to the same device or browser that bought them.'),
+    h('div.stats',
+      stat(money(sum('approved'), ev.currency), 'Approved total'),
+      stat(String(votesOf('approved')), 'Votes sold'),
+      stat(money(sum('pending'), ev.currency), 'Awaiting review'),
+      stat(String(all.filter((r) => r.status === 'pending').length), 'Pending payments')),
+    rows.length ? h('div.table-wrap', h('table',
+      h('thead', h('tr', ['Receipt', 'Voter', 'Device', 'Votes', 'Amount', 'Reference', 'Time', 'Status', ''].map((t) => h('th', t)))),
+      pagedBody(rows, (r) => h('tr',
+        h('td', r.proof_path && signed[r.proof_path]
+          ? h('img.proof-thumb', { src: signed[r.proof_path], alt: 'receipt', onclick: () => modal('Receipt', h('img', { src: signed[r.proof_path], alt: 'receipt', style: { width: '100%' } })) })
+          : h('span.muted', '—')),
+        h('td', h('b', r.voters?.name || '(no name)'), h('div.muted.small', [r.voters?.email, r.voters?.phone, r.voters?.extra].filter(Boolean).join(' · '))),
+        h('td.small', h('div', `${r.voters?.device_info?.type || ''} · ${r.voters?.device_info?.os || ''}`),
+          h('div.mono.muted', { title: r.fingerprint }, `fp ${String(r.fingerprint || '').slice(0, 10)}…`),
+          h('div.mono.muted', r.ip || '')),
+        h('td', h('b', r.quantity)),
+        h('td', money(r.amount, ev.currency)),
+        h('td', h('span.mono', r.payment_ref || '—')),
+        h('td.small', new Date(r.created_at).toLocaleString()),
+        h('td', h('span.badge', { class: r.status }, r.status)),
+        h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
+          r.status !== 'approved' ? h('button.btn.ok.sm', { onclick: () => review([r.id], 'approved') }, 'Approve') : null,
+          r.status !== 'rejected' ? h('button.btn.sm', { onclick: () => review([r.id], 'rejected') }, 'Reject') : null)))))) :
+      h('div.card', h('p.muted', `No ${filter === 'all' ? '' : filter + ' '}payments.`)));
+  poll(main, () => { if (!document.querySelector('.modal-wrap')) renderTab(); }, 20000);
+}
+
 // Big tables render PAGE rows at a time, with a "Show more" row at the end.
 const PAGE = 200;
 function pagedBody(items, row) {
@@ -913,11 +981,25 @@ function pagedBody(items, row) {
 // Tab: Votes & voters
 // ---------------------------------------------------------------------
 async function tabVotes(main) {
-  const [votes, voters, attempts] = await Promise.all([
+  const [votes, voters, attempts, purchases] = await Promise.all([
     fetchAll(() => sb.from('votes').select('*, contestants(name,number)').eq('event_id', ev.id).order('created_at', { ascending: false }).order('id')),
     fetchAll(() => sb.from('voters').select('*').eq('event_id', ev.id).order('created_at', { ascending: false }).order('id')),
     sb.from('vote_attempts').select('*').eq('event_id', ev.id).order('created_at', { ascending: false }).limit(300).then((r) => r.data || []),
+    ev.pricing === 'free_paid'
+      ? fetchAll(() => sb.from('credit_purchases').select('voter_id,quantity,status').eq('event_id', ev.id).order('id'))
+      : Promise.resolve([]),
   ]);
+  const creditsBy = {};
+  for (const p of purchases) {
+    const c = (creditsBy[p.voter_id] ||= { approved: 0, pending: 0 });
+    if (p.status === 'approved') c.approved += p.quantity;
+    else if (p.status === 'pending') c.pending += p.quantity;
+  }
+  const creditLabel = (id) => {
+    const c = creditsBy[id];
+    if (!c || (!c.approved && !c.pending)) return null;
+    return h('div.credit-tag', `Bought ${c.approved}`, c.pending ? ` (+${c.pending} pending)` : '');
+  };
   const view = localStorage.getItem('votes_view') || 'voters';
   const voterById = Object.fromEntries(voters.map((v) => [v.id, v]));
   const fpCount = countBy(voters, 'fingerprint');
@@ -966,7 +1048,8 @@ async function tabVotes(main) {
             h('td.small', h('div', `${v.device_info?.type || ''} · ${v.device_info?.os || ''}`), h('div.muted', v.device_info?.model || v.device_info?.browser || ''),
               h('div.mono.muted', { title: v.fingerprint }, `fp ${String(v.fingerprint).slice(0, 10)}…`)),
             h('td.small.mono', v.ip || '—'),
-            h('td.small', vv.map((x) => `${x.contestants?.name || '?'}${x.quantity > 1 ? ' ×' + x.quantity : ''}${x.status === 'pending' ? ' (pending)' : ''}`).join(', ') || '—'),
+            h('td.small', vv.map((x) => `${x.contestants?.name || '?'}${x.quantity > 1 ? ' ×' + x.quantity : ''}${x.status === 'pending' ? ' (pending)' : ''}`).join(', ') || '—',
+              creditLabel(v.id)),
             h('td.small', f.length ? f.map((t) => h('div', { style: { color: 'var(--warn-ink)' } }, '⚠ ' + t)) : h('span.muted', '—')),
             h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
               h('button.btn.sm', { onclick: () => showDevice(v) }, 'Details'),
@@ -982,7 +1065,7 @@ async function tabVotes(main) {
           h('td', x.contestants?.name || '—'),
           h('td', x.quantity),
           ev.voting_mode === 'criteria' ? h('td.small.mono', x.scores ? Object.values(x.scores).join(' / ') : '—') : null,
-          h('td', h('span.badge', { class: x.status }, x.status)),
+          h('td', h('span.badge', { class: x.status }, x.status), x.from_credits ? h('span.badge.credit', { style: { marginLeft: '.3rem' } }, 'bought') : null),
           h('td', h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
             if (!(await confirmBox('Delete vote?', 'Remove this vote permanently?', 'Delete', true))) return;
             const { error } = await sb.from('votes').delete().eq('id', x.id);
@@ -1019,7 +1102,8 @@ async function tabVotes(main) {
       stat(String(voters.length), 'Voters'),
       stat(String(new Set(voters.map((v) => v.fingerprint)).size), 'Unique devices'),
       stat(String(new Set(voters.map((v) => v.ip).filter(Boolean)).size), 'Unique IPs'),
-      stat(String(attempts.length), 'Blocked attempts')),
+      stat(String(attempts.length), 'Blocked attempts'),
+      ev.pricing === 'free_paid' ? stat(String(votes.filter((x) => x.from_credits).length), 'Votes cast with bought credits') : null),
     h('div.row.section', { style: { marginBottom: '.75rem' } },
       ['voters', 'votes', 'attempts'].map((k) => h('button.btn.sm', {
         class: view === k ? 'primary' : '',

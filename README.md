@@ -22,6 +22,7 @@ the database, admin login and image storage run on the **Supabase free tier**. T
 - **Voting rules**
   - *Voting style*: "Pick a contestant" (criteria shown as a guide), or "Rate each criterion" (1–N sliders, weighted score).
   - *Pricing*: free, or paid per vote. Voters pay you directly (GCash/Maya/bank QR), enter a reference no. and/or upload a receipt, and you approve it.
+  - *Free + paid*: everyone gets their free votes first. A voter who uses them all sees a "Buy more votes" notice, picks how many votes to buy, pays by scanning your QR code and sends the reference no. and/or receipt. When you approve it in **Payments**, the votes are added to the same device and browser that bought them (and any browser the anti-cheat treats as the same person), within about 10 seconds and without a reload. Bought votes can go to any contestant, including one already voted for.
   - *Limits*: total votes per person, how many different contestants, and whether repeat votes for the same contestant are allowed. One-click presets are included.
   - *Voter details*: name, email, mobile, and a custom field (e.g. Student ID). Email can be limited to specific domains (e.g. only `@ces.edu.ph`).
 - **Anti-cheat** (see below), plus a log of every blocked attempt.

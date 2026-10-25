@@ -539,3 +539,15 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
 .confirm-note .icon { margin-top: .1rem; }
 .subsection { margin-top: .25rem; padding: .9rem; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
   background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
+.pending-chip { display: inline-flex; align-items: center; gap: .35rem; justify-self: start; margin-top: .3rem; padding: .2rem .6rem; border-radius: 999px;
+  font-size: .78rem; font-weight: 700; color: var(--warn-ink); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.credits-text .pending-chip { color: var(--warn-ink); font-size: .78rem; }
+.credits-done { display: grid; justify-items: center; text-align: center; gap: .5rem; padding: 1rem 0 .5rem; }
+.credits-done b { font-size: 1.2rem; }
+.credits-done p { margin: 0; max-width: 34ch; }
+.done-icon { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--ok);
+  animation: checkout-pop .45s cubic-bezier(.34, 1.56, .64, 1); }
+.checkout-btn:disabled { opacity: .6; cursor: progress; }
+.credit-tag { display: inline-block; margin-top: .3rem; font-size: .75rem; font-weight: 700; color: var(--brand-text);
+  background: color-mix(in srgb, var(--brand) 12%, transparent); padding: .1rem .5rem; border-radius: 999px; }
+.badge.credit { background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand-text); }

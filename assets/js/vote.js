@@ -39,6 +39,20 @@ async function main() {
   if (event.show_live_results) loadResults();
   // Poll results every 15 s (if shown), and not at all while the tab is hidden.
   setInterval(() => { if (!document.hidden && event?.show_live_results) loadResults(); }, 15000);
+  // While a credit payment waits for the organizer, check every 10 s so the
+  // votes appear on this device as soon as it is approved.
+  setInterval(async () => {
+    if (document.hidden || !myStatus?.credits_pending) return;
+    const before = { credits: myStatus.credits, pending: myStatus.credits_pending };
+    await refreshStatus();
+    if (myStatus.credits > before.credits) {
+      const added = myStatus.credits - before.credits;
+      toast(`Payment confirmed! ${plural(added, 'extra vote')} added.`, 'success');
+    } else if (myStatus.credits_pending < before.pending) {
+      toast('A payment was not confirmed. Contact the organizer if you think this is a mistake.', 'error');
+    }
+    if (myStatus.credits !== before.credits || myStatus.credits_pending !== before.pending) render();
+  }, 10000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && event?.show_live_results) loadResults(); });
 }
 
@@ -228,11 +242,14 @@ function render() {
         if (k === 'standings') loadResults();
       } }, label))) : null;
 
+  // Free + paid: once the free votes are used, bought votes can go to anyone,
+  // including a contestant this voter already picked.
+  const onCredit = event.pricing === 'free_paid' && event.max_votes_per_voter > 0 && (myStatus?.used ?? 0) >= event.max_votes_per_voter;
   const matches = (c) => !query || `${c.name} ${c.number || ''} ${c.description || ''}`.toLowerCase().includes(query);
   const cards = contestants.map((c, i) => {
     const v = votedInfo(c.id);
     const canVote = state.open && !myStatus?.blocked && (remaining == null || remaining > 0) &&
-      (event.allow_repeat_contestant || !v);
+      (event.allow_repeat_contestant || !v || onCredit);
     const link = cleanUrl(c.link_url);
     // The photo doubles as a button: play the video, or open the link in a new tab.
     const photoTag = c.video_url ? 'button.photo.media' : link ? 'a.photo.media' : 'div.photo';
@@ -253,7 +270,7 @@ function render() {
         h('h3', c.name),
         c.description ? h('p.desc', c.description) : null,
         h('button.btn.vote', { type: 'button', class: canVote ? 'primary' : '', disabled: !canVote, onclick: () => openVote(c), 'aria-label': canVote ? `Vote for ${c.name}` : null },
-          !state.open ? state.button : v && !event.allow_repeat_contestant ? [icon('check', 16), 'Voted'] : 'Vote')));
+          !state.open ? state.button : v && !event.allow_repeat_contestant && !(onCredit && canVote) ? [icon('check', 16), 'Voted'] : 'Vote')));
     card._match = () => matches(c);
     return card;
   });
@@ -267,13 +284,16 @@ function render() {
         empty.hidden = cards.some((c) => !c.hidden);
       } })) : null;
 
-  // Shown above the contestants once this voter has used every vote.
-  const outOfVotes = event.pricing === 'free_paid' && event.credits_enabled !== false && state.open && !myStatus?.blocked && remaining === 0;
-  const creditsNotice = outOfVotes ? h('div.credits-notice', { role: 'status' },
+  // Shown above the contestants once this voter has used every vote, and
+  // while a credit payment is waiting for the organizer.
+  const credits = event.pricing === 'free_paid' && event.credits_enabled !== false && state.open && !myStatus?.blocked;
+  const pending = Number(myStatus?.credits_pending) || 0;
+  const creditsNotice = credits && (remaining === 0 || pending > 0) ? h('div.credits-notice', { role: 'status' },
     h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 24)),
     h('div.credits-text',
-      h('b', event.credits_title || CREDITS_DEFAULTS.title),
-      h('span', event.credits_message || CREDITS_DEFAULTS.message)),
+      h('b', remaining === 0 ? event.credits_title || CREDITS_DEFAULTS.title : 'Payment sent'),
+      h('span', remaining === 0 ? event.credits_message || CREDITS_DEFAULTS.message : 'Your extra votes are added here once the organizer confirms.'),
+      pending ? h('span.pending-chip', icon('clock', 14), `${plural(pending, 'vote')} waiting for confirmation`) : null),
     h('button.btn.primary.sm', { type: 'button', onclick: openBuyCredits }, icon('shopping-bag', 16), event.credits_button || CREDITS_DEFAULTS.button)) : null;
 
   const content = view === 'standings'
@@ -354,9 +374,47 @@ function openBuyCredits() {
     qty.focus();
   };
 
-  // Step 2: pay the total by scanning the organizer's QR code.
+  // Step 2: pay the total by scanning the organizer's QR code, then send
+  // the reference number and/or receipt so the organizer can confirm it.
   const payStep = (n) => {
     if (n < 1) return;
+    let proofFile = null;
+    const ref = h('input#credits-ref', { type: 'text', placeholder: 'e.g. GCash reference no.', autocomplete: 'off' });
+    const proofName = h('span.muted.small#credits-proof-name', { 'aria-live': 'polite' }, 'No file chosen');
+    const proofInput = h('input', { type: 'file', accept: 'image/*', class: 'hidden', tabIndex: -1, onchange: (e) => {
+      proofFile = e.target.files[0] || null;
+      proofName.textContent = proofFile ? proofFile.name : 'No file chosen';
+    } });
+    const submit = h('button.checkout-btn', { type: 'button', onclick: async () => {
+      fieldError(ref, '');
+      if (!ref.value.trim() && !proofFile) { fieldError(ref, 'Enter the reference number or upload your receipt.'); return; }
+      submit.disabled = true;
+      submit.setAttribute('aria-busy', 'true');
+      try {
+        await devicePromise;
+        let proofPath = null;
+        if (proofFile) proofPath = await uploadImage('proofs', `${event.id}/credits`, proofFile, 1600);
+        const { data, error } = await sb.rpc('buy_credits', {
+          p_event_id: event.id, p_voter: voterPayload(), p_quantity: n,
+          p_payment_ref: ref.value.trim() || null, p_proof_path: proofPath,
+        });
+        if (error) throw error;
+        if (!data.ok) {
+          if (data.code === 'PAYMENT_REQUIRED') fieldError(ref, data.message);
+          else toast(data.message, 'error');
+          return;
+        }
+        await refreshStatus();
+        render();
+        doneStep(n);
+      } catch (e) {
+        toast('Could not send your payment: ' + (e.message || e), 'error');
+      } finally {
+        submit.disabled = false;
+        submit.removeAttribute('aria-busy');
+      }
+    } }, icon('check', 18), h('span', 'I have paid, send for confirmation'));
+
     fill(box,
       h('button.btn.sm.ghost', { type: 'button', onclick: pickStep }, '← Change amount'),
       h('div.pay-summary',
@@ -365,8 +423,20 @@ function openBuyCredits() {
       event.payment_qr_url
         ? h('div.qr-frame', h('img', { src: event.payment_qr_url, alt: 'Payment QR code' }), h('small', 'Scan with GCash, Maya or your bank app'))
         : h('p.notice', 'The organizer has not added a payment QR code yet.'),
-      h('p.confirm-note', icon('clock', 18), h('span', 'Your extra votes are added once the organizer confirms your payment.')));
+      h('label.field', { for: 'credits-ref' }, h('span', 'Payment reference number'), ref),
+      h('div.row',
+        h('button.btn.sm', { type: 'button', 'aria-describedby': 'credits-proof-name', onclick: () => proofInput.click() }, icon('upload', 16), 'Upload receipt'),
+        proofInput, proofName),
+      h('p.confirm-note', icon('clock', 18), h('span', 'Your extra votes are added once the organizer confirms your payment.')),
+      submit);
   };
+
+  // Step 3: sent. The votes appear on this device once approved.
+  const doneStep = (n) => fill(box,
+    h('div.credits-done',
+      h('span.done-icon', { 'aria-hidden': 'true' }, icon('check', 30)),
+      h('b', 'Payment sent!'),
+      h('p.muted.small', `${plural(n, 'vote')} will be added to this device as soon as the organizer confirms your payment. You can keep this page open; it updates by itself.`)));
 
   pickStep();
   modal('Buy vote credits', box, [{ label: 'Close', value: null }]);
