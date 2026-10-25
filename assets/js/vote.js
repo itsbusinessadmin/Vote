@@ -385,8 +385,7 @@ function openPurchases() {
     await refreshStatus();
     draw();
   }, 10000);
-  modal('My purchases', list,
-    [{ label: 'Close', value: null }]);
+  modal('My purchases', list);
 }
 
 // ---------------------------------------------------------------------
