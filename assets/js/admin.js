@@ -639,13 +639,6 @@ const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'cur
   'cooldown_seconds', 'show_live_results', 'show_vote_counts',
   'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button', 'credits_require_receipt'];
 
-const LIMIT_PRESETS = [
-  ['One vote only', 'Each person picks one contestant, once.', { max_votes_per_voter: 1, max_contestants_per_voter: 1, allow_repeat_contestant: false }],
-  ['Up to 3 contestants', 'One vote each for up to 3 different contestants.', { max_votes_per_voter: 3, max_contestants_per_voter: 3, allow_repeat_contestant: false }],
-  ['10 votes, spread freely', 'Any mix, including several for the same contestant.', { max_votes_per_voter: 10, max_contestants_per_voter: 0, allow_repeat_contestant: true }],
-  ['Unlimited', 'No cap. Best for paid votes.', { max_votes_per_voter: 0, max_contestants_per_voter: 0, allow_repeat_contestant: true }],
-];
-
 // Radio cards: one choice from a few options, each with a short explanation.
 function choice(obj, key, legend, options) {
   return h('fieldset.choices',
@@ -654,6 +647,33 @@ function choice(obj, key, legend, options) {
       h('input', { type: 'radio', name: `rule-${key}`, value, checked: String(obj[key]) === String(value),
         onchange: () => { obj[key] = value; } }),
       h('div', h('b', title), desc ? h('small', desc) : null))));
+}
+
+// A simple settings row: label on the left, − number + on the right.
+// 0 means no limit.
+function stepRow(obj, key, label) {
+  const el = input(obj, key, 'number', { min: 0, step: 1, inputMode: 'numeric', 'aria-label': label });
+  const note = h('span.setting-note');
+  const show = () => { note.textContent = Number(el.value) > 0 ? '' : 'No limit'; };
+  const bump = (n) => {
+    el.value = Math.max(0, (Math.floor(Number(el.value)) || 0) + n);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  el.addEventListener('input', show);
+  show();
+  return h('div.setting-row',
+    h('span.setting-label', label, note),
+    h('div.mini-stepper',
+      h('button', { type: 'button', 'aria-label': `Fewer: ${label}`, onclick: () => bump(-1) }, '−'),
+      el,
+      h('button', { type: 'button', 'aria-label': `More: ${label}`, onclick: () => bump(1) }, '+')));
+}
+
+// A settings row with an on/off switch.
+function switchRow(obj, key, label) {
+  const el = input(obj, key, 'checkbox');
+  el.setAttribute('role', 'switch');
+  return h('label.setting-row', h('span.setting-label', label), h('span.switch', el, h('i', { 'aria-hidden': 'true' })));
 }
 
 async function tabRules(main, draft, openId) {
@@ -671,15 +691,6 @@ async function tabRules(main, draft, openId) {
       h('div', h('h2.card-title', { id: `rules-${id}-h` }, title), desc ? h('p.small.muted', desc) : null)),
     kids);
 
-  const presetRow = h('div.presets');
-  const drawPresets = () => fill(presetRow, LIMIT_PRESETS.map(([title, desc, p]) => {
-    const active = Object.entries(p).every(([k, v]) => norm(d[k]) === norm(v));
-    return h('button.preset', { type: 'button', 'aria-pressed': String(active), onclick: () => {
-      // Redraw the form with the preset applied, and reopen this window on it.
-      presetRow.closest('.modal-wrap')?.querySelector('.modal-head .icon-btn')?.click();
-      tabRules(main, { ...d, ...p }, 'limits');
-    } }, h('b', title), h('small', desc));
-  }));
 
   const summary = h('ul.rules.small');
   const status = h('span.small', { role: 'status' });
@@ -690,7 +701,6 @@ async function tabRules(main, draft, openId) {
     conditional.forEach(([el, cond]) => el.classList.toggle('hidden', !cond()));
     fill(summary, rulesList(d).map((t) => h('li', t)));
     drawList();
-    drawPresets();
     const dirty = isDirty();
     status.textContent = dirty ? 'You have unsaved changes' : 'All changes saved';
     status.className = `small ${dirty ? 'unsaved' : 'muted'}`;
@@ -708,15 +718,11 @@ async function tabRules(main, draft, openId) {
         field('Highest rating', input(d, 'score_max', 'number', { min: 2, max: 100 }), 'Voters rate from 1 up to this number.'),
         !criteriaCount ? h('p.small.notice', 'You have no criteria yet. Add them in the Criteria tab, or voters will have nothing to rate.') : null)),
 
-    section('limits', 2, 'How many votes', 'Pick a preset, then fine-tune if needed.',
-      presetRow,
-      h('details.more', { open: !LIMIT_PRESETS.some(([, , p]) => Object.entries(p).every(([k, v]) => norm(d[k]) === norm(v))) },
-        h('summary', 'Fine-tune the limits'),
-        h('div.stack', { style: { marginTop: '.75rem' } },
-          h('div.grid-2',
-            field('Total votes per person', input(d, 'max_votes_per_voter', 'number', { min: 0 }), '0 = unlimited. For paid votes, this counts votes bought.'),
-            field('Different contestants per person', input(d, 'max_contestants_per_voter', 'number', { min: 0 }), '1 = only one contestant. 0 = unlimited.')),
-          check(d, 'allow_repeat_contestant', 'Allow more than one vote for the same contestant')))),
+    section('limits', 2, 'How many votes', null,
+      h('div.setting-list',
+        stepRow(d, 'max_votes_per_voter', 'Votes per person'),
+        stepRow(d, 'max_contestants_per_voter', 'Contestants per person'),
+        switchRow(d, 'allow_repeat_contestant', 'Vote for the same contestant again'))),
 
     section('payment', 3, 'Free or paid', null,
       choice(d, 'pricing', 'Pricing', [
