@@ -637,7 +637,7 @@ const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'cur
   'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots',
   'block_private', 'max_voters_per_network', 'desktop_only',
   'cooldown_seconds', 'show_live_results', 'show_vote_counts',
-  'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button'];
+  'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button', 'credits_require_receipt'];
 
 const LIMIT_PRESETS = [
   ['One vote only', 'Each person picks one contestant, once.', { max_votes_per_voter: 1, max_contestants_per_voter: 1, allow_repeat_contestant: false }],
@@ -735,6 +735,8 @@ async function tabRules(main, draft) {
               field('Notice title', input(d, 'credits_title', 'text', { placeholder: CREDITS_DEFAULTS.title })),
               field('Notice message', input(d, 'credits_message', 'text', { placeholder: CREDITS_DEFAULTS.message }))),
             imageUpload('Payment QR code', 'payment_qr_url', { hint: 'Voters scan this to pay. For example, your GCash / Maya / bank QR. Square, up to 900 × 900 px.', maxSide: 900 }),
+            check(d, 'credits_require_receipt', 'Require a receipt screenshot',
+              'Voters must upload a screenshot of their payment before sending it. Untick to hide the upload; you then confirm payments by amount and time in your GCash / Maya / bank app.'),
             h('p.small.muted', 'Leave a text blank to use the default shown in grey.'))))),
       when(() => d.pricing === 'paid',
         h('div.grid-2',

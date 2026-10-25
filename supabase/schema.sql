@@ -156,6 +156,7 @@ alter table public.events add column if not exists credits_price numeric(12, 2) 
 alter table public.events add column if not exists credits_title text;
 alter table public.events add column if not exists credits_message text;
 alter table public.events add column if not exists credits_button text;
+alter table public.events add column if not exists credits_require_receipt boolean not null default true;
 
 create index if not exists voters_fp_idx    on public.voters (event_id, fingerprint);
 create index if not exists voters_cross_idx on public.voters (event_id, cross_id);
@@ -639,8 +640,8 @@ begin
     return jsonb_build_object('ok', false, 'code', 'NO_DEVICE', 'message', 'Your browser could not be verified. Please enable JavaScript and storage, then reload.');
   elsif v_qty < 1 or v_qty > e.max_qty_per_vote then
     return jsonb_build_object('ok', false, 'code', 'BAD_QUANTITY', 'message', 'Choose between 1 and ' || e.max_qty_per_vote || ' votes.');
-  elsif v_ref is null and v_proof is null then
-    return jsonb_build_object('ok', false, 'code', 'PAYMENT_REQUIRED', 'message', 'Enter your payment reference number or upload a receipt.');
+  elsif e.credits_require_receipt and v_proof is null then
+    return jsonb_build_object('ok', false, 'code', 'PAYMENT_REQUIRED', 'message', 'Upload a screenshot of your payment receipt.');
   end if;
 
   v_ids := public._matching_voters(e, v_fp, v_tok, v_ip,

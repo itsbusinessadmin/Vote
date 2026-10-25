@@ -435,6 +435,7 @@ function openBuyCredits() {
   const payStep = (n) => {
     if (n < 1) return;
     let proofFile = null;
+    const needReceipt = event.credits_require_receipt !== false;
     const proofName = h('span.small#credits-proof-name', { 'aria-live': 'polite' }, 'No receipt yet');
     const proofBtn = h('button.btn.sm', { type: 'button', 'aria-describedby': 'credits-proof-name', onclick: () => proofInput.click() },
       icon('upload', 16), 'Upload receipt screenshot');
@@ -445,12 +446,12 @@ function openBuyCredits() {
     } });
     const submit = h('button.checkout-btn', { type: 'button', onclick: async () => {
       fieldError(proofBtn, '');
-      if (!proofFile) { fieldError(proofBtn, 'Upload a screenshot of your payment receipt.'); return; }
+      if (needReceipt && !proofFile) { fieldError(proofBtn, 'Upload a screenshot of your payment receipt.'); return; }
       submit.disabled = true;
       submit.setAttribute('aria-busy', 'true');
       try {
         await devicePromise;
-        const proofPath = await uploadImage('proofs', `${event.id}/credits`, proofFile, 1600);
+        const proofPath = proofFile ? await uploadImage('proofs', `${event.id}/credits`, proofFile, 1600) : null;
         const { data, error } = await sb.rpc('buy_credits', {
           p_event_id: event.id, p_voter: voterPayload(), p_quantity: n, p_payment_ref: null, p_proof_path: proofPath,
         });
@@ -475,7 +476,7 @@ function openBuyCredits() {
       event.payment_qr_url
         ? h('div.qr-frame', h('img', { src: event.payment_qr_url, alt: 'Payment QR code' }), h('small', 'Scan with GCash, Maya or your bank app'))
         : h('p.notice', 'The organizer has not added a payment QR code yet.'),
-      h('div.field', h('div.row', proofBtn, proofInput, proofName)),
+      needReceipt ? h('div.field', h('div.row', proofBtn, proofInput, proofName)) : null,
       h('p.confirm-note', icon('clock', 18), h('span', 'Your extra votes are added once the organizer confirms your payment.')),
       submit);
   };
