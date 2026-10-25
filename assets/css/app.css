@@ -576,3 +576,6 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
 .buy-pill:hover { transform: translateY(-1px); }
 .buy-pill:active { transform: scale(.95); }
 .topbar .buy-pill { padding: .2rem .65rem; font-size: .78rem; }
+.credit-use { display: grid; gap: .4rem; padding: .85rem; border-radius: 14px; background: color-mix(in srgb, var(--brand) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 25%, transparent); }
+.credit-use .field-label { margin: 0; }

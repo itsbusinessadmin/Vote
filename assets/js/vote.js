@@ -577,12 +577,30 @@ function openVote(c) {
       proofInput, proofName),
     h('small.muted', event.require_payment_proof ? 'A reference number or a receipt screenshot is required.' : 'Optional.')) : null;
 
+  // Free + paid: once the free votes are used, a voter with 2 or more bought
+  // votes can put several on this contestant at once.
+  const onCredit = event.pricing === 'free_paid' && event.max_votes_per_voter > 0 && (myStatus?.used ?? 0) >= event.max_votes_per_voter;
+  const useCredits = onCredit && remaining >= 2;
+  const useMax = useCredits ? Math.min(remaining, event.max_qty_per_vote || remaining) : 1;
+  const useQty = h('input#credit-use-qty', { type: 'number', min: 1, max: useMax, step: 1, value: 1, inputMode: 'numeric',
+    'aria-label': `Votes for ${c.name}` });
+  const useCount = () => Math.min(useMax, Math.max(1, Math.floor(Number(useQty.value)) || 1));
+  const setUse = (n) => { useQty.value = Math.min(useMax, Math.max(1, n)); };
+  useQty.addEventListener('change', () => setUse(useCount()));
+
   const body = h('div.stack',
     h('div.row',
       c.photo_url ? h('img', { src: c.photo_url, alt: '', style: { width: '64px', height: '64px', objectFit: 'cover', borderRadius: '12px' } }) : null,
       h('div', h('div.muted.small', c.number ? `#${c.number}` : 'Contestant'), h('h3', { style: { margin: 0 } }, c.name))),
     identityFields.length ? h('div.stack', identityFields) : null,
     scoreRows.length ? h('div', h('h3.card-title', 'Your ratings'), scoreRows) : null,
+    useCredits ? h('div.credit-use',
+      h('span.field-label', { id: 'credit-use-label' }, `How many votes for ${c.name}?`),
+      h('div.qty-stepper', { role: 'group', 'aria-labelledby': 'credit-use-label' },
+        h('button.step-btn', { type: 'button', 'aria-label': 'One less', onclick: () => setUse(useCount() - 1) }, '−'),
+        useQty,
+        h('button.step-btn', { type: 'button', 'aria-label': 'One more', onclick: () => setUse(useCount() + 1) }, '+')),
+      h('small.muted', `You have ${plural(remaining, 'bought vote')} left.`)) : null,
     payment);
 
   modal(`Vote for ${c.name}`, body, [
@@ -608,7 +626,7 @@ function openVote(c) {
         p_event_id: event.id,
         p_contestant_id: c.id,
         p_voter: voterPayload(identity),
-        p_quantity: paid ? Math.max(1, Math.floor(Number(qty.value)) || 1) : 1,
+        p_quantity: paid ? Math.max(1, Math.floor(Number(qty.value)) || 1) : useCredits ? useCount() : 1,
         p_scores: event.voting_mode === 'criteria' ? scores : null,
         p_payment_ref: paid ? ref.value.trim() : null,
         p_proof_path: proofPath,
@@ -617,7 +635,7 @@ function openVote(c) {
       if (!data.ok) {
         // Show field problems next to the field; everything else as a toast.
         const target = { NAME_REQUIRED: fields.name, EMAIL_REQUIRED: fields.email, EMAIL_DOMAIN: fields.email, PHONE_REQUIRED: fields.phone,
-          EXTRA_REQUIRED: fields.extra, PAYMENT_REQUIRED: ref, BAD_QUANTITY: qty }[data.code];
+          EXTRA_REQUIRED: fields.extra, PAYMENT_REQUIRED: ref, BAD_QUANTITY: useCredits ? useQty : qty }[data.code];
         if (target) { fieldError(target, data.message); return false; }
         toast(data.message, 'error');
         if (['LIMIT_REACHED', 'ALREADY_VOTED', 'CONTESTANT_LIMIT', 'BLOCKED', 'VOTING_CLOSED'].includes(data.code)) {
@@ -628,6 +646,7 @@ function openVote(c) {
       }
       toast(data.status === 'pending'
         ? 'Vote submitted! It will count once your payment is confirmed.'
+        : useCredits && useCount() > 1 ? `Thank you! Your ${useCount()} votes for ${c.name} have been counted.`
         : 'Thank you! Your vote has been counted.', 'success');
       await refreshStatus();
       render();

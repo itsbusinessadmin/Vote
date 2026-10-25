@@ -442,8 +442,13 @@ begin
   end if;
 
   if v_code is null then
-    if e.pricing <> 'paid' then  -- free, or free + paid
+    if e.pricing = 'free' then
       v_qty := 1;
+    elsif e.pricing = 'free_paid' then
+      -- Several votes at once only with bought credits (checked below).
+      if v_qty < 1 or v_qty > greatest(e.max_qty_per_vote, 1) then
+        v_code := 'BAD_QUANTITY'; v_msg := 'Choose between 1 and ' || e.max_qty_per_vote || ' votes.';
+      end if;
     elsif v_qty < 1 or v_qty > e.max_qty_per_vote then
       v_code := 'BAD_QUANTITY'; v_msg := 'Choose between 1 and ' || e.max_qty_per_vote || ' votes.';
     elsif e.require_payment_proof and coalesce(trim(p_payment_ref), '') = '' and coalesce(p_proof_path, '') = '' then
@@ -489,6 +494,8 @@ begin
             select count(*) from public.voters
              where event_id = e.id and public._ip_conn(ip) = public._ip_conn(v_ip)) >= e.max_voters_per_network then
         v_code := 'NETWORK_LIMIT'; v_msg := 'Too many people have already voted from this internet connection.';
+      elsif v_qty > 1 and not v_on_credit then
+        v_code := 'BAD_QUANTITY'; v_msg := 'Free votes are cast one at a time.';
       elsif e.cooldown_seconds > 0 and v_last is not null and now() - v_last < make_interval(secs => e.cooldown_seconds) then
         v_code := 'TOO_FAST'; v_msg := 'Please wait a few seconds before voting again.';
       elsif e.max_votes_per_voter > 0 and v_used + v_qty > v_limit then
