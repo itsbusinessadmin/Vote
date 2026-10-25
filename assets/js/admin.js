@@ -873,7 +873,7 @@ async function tabPayments(main) {
   const filter = localStorage.getItem('pay_filter') || 'pending';
   const [rows, allPaid] = await Promise.all([
     fetchAll(() => {
-      let q = sb.from('votes').select('*, voters(name,email,phone,extra), contestants(name,number)')
+      let q = sb.from('votes').select('*, voters(*), contestants(name,number)')
         .eq('event_id', ev.id).not('amount', 'is', null).order('created_at', { ascending: false }).order('id');
       if (filter !== 'all') q = q.eq('status', filter);
       return q;
@@ -909,12 +909,14 @@ async function tabPayments(main) {
       stat(money(sum('pending'), ev.currency), 'Awaiting review'),
       stat(String(allPaid.filter((v) => v.status === 'pending').length), 'Pending payments')),
     rows.length ? h('div.table-wrap', h('table',
-      h('thead', h('tr', ['Receipt', 'Voter', 'Contestant', 'Votes', 'Amount', 'Reference', 'Time', 'Status', ''].map((t) => h('th', t)))),
+      h('thead', h('tr', ['Receipt', 'Voter', 'Device', 'Network', 'Contestant', 'Votes', 'Amount', 'Reference', 'Time', 'Status', ''].map((t) => h('th', t)))),
       pagedBody(rows, (r) => h('tr',
         h('td', r.proof_path && signed[r.proof_path]
           ? h('img.proof-thumb', { src: signed[r.proof_path], alt: 'receipt', onclick: () => modal('Receipt', h('img', { src: signed[r.proof_path], alt: 'receipt', style: { width: '100%' } })) })
           : h('span.muted', '—')),
-        h('td', h('b', r.voters?.name || '—'), h('div.muted.small', [r.voters?.email, r.voters?.phone, r.voters?.extra].filter(Boolean).join(' · '))),
+        voterCell(r.voters),
+        deviceCell(r.voters),
+        networkCell(r.voters),
         h('td', r.contestants?.name || '—'),
         h('td', r.quantity),
         h('td', money(r.amount, ev.currency)),
@@ -931,15 +933,47 @@ async function tabPayments(main) {
 
 const stat = (value, label) => h('div.stat', h('b', value), h('span', label));
 
+// One voter shown the same way everywhere (Votes & voters, Payments), always
+// read from the voter's own record, so every tab shows identical details.
+const voterCell = (v) => h('td',
+  h('b', v?.name || '(no name)'), v?.blocked ? h('span.badge.closed', { style: { marginLeft: '.4rem' } }, 'blocked') : null,
+  h('div.muted.small', [v?.email, v?.phone, v?.extra].filter(Boolean).join(' · ')),
+  v?.created_at ? h('div.muted.small', `First vote ${new Date(v.created_at).toLocaleString()}`) : null);
+const deviceCell = (v) => h('td.small',
+  h('div', `${v?.device_info?.type || ''} · ${v?.device_info?.os || ''}`),
+  h('div.muted', v?.device_info?.model || v?.device_info?.browser || ''),
+  h('div.mono.muted', { title: v?.fingerprint || '' }, `fp ${String(v?.fingerprint || '').slice(0, 10)}…`));
+const networkCell = (v) => h('td.small.mono', v?.ip || '—');
+
 // Payments for "Free + paid" events: voters who used their free votes and
 // bought more. Approving a purchase adds its votes to that voter right away;
 // their page picks it up within seconds.
 async function tabCreditPayments(main) {
   const filter = localStorage.getItem('pay_filter') || 'pending';
-  const all = await fetchAll(() => sb.from('credit_purchases')
-    .select('*, voters(name,email,phone,extra,device_info,fingerprint,ip)')
-    .eq('event_id', ev.id).order('created_at', { ascending: false }).order('id'));
+  const [all, votes] = await Promise.all([
+    fetchAll(() => sb.from('credit_purchases').select('*, voters(*)')
+      .eq('event_id', ev.id).order('created_at', { ascending: false }).order('id')),
+    fetchAll(() => sb.from('votes').select('voter_id,quantity,status,from_credits').eq('event_id', ev.id).order('id')),
+  ]);
+  // Per voter: votes cast (free and bought) and credits, from the same records the Votes & voters tab reads.
+  const used = {};
+  for (const x of votes) {
+    if (x.status === 'rejected') continue;
+    const u = (used[x.voter_id] ||= { free: 0, bought: 0 });
+    if (x.from_credits) u.bought += x.quantity; else u.free += x.quantity;
+  }
+  const credits = {};
+  for (const r of all) {
+    const c = (credits[r.voter_id] ||= { approved: 0, pending: 0 });
+    if (r.status === 'approved') c.approved += r.quantity; else if (r.status === 'pending') c.pending += r.quantity;
+  }
+  const usageLine = (id) => {
+    const u = used[id] || { free: 0, bought: 0 }, c = credits[id] || { approved: 0, pending: 0 };
+    const free = Number(ev.max_votes_per_voter) > 0 ? `${u.free} of ${ev.max_votes_per_voter} free votes used` : `${u.free} free votes used`;
+    return `${free} · bought ${c.approved} confirmed${c.pending ? `, ${c.pending} pending` : ''} · ${u.bought} bought used`;
+  };
   const rows = filter === 'all' ? all : all.filter((r) => r.status === filter);
+  const showRef = rows.some((r) => r.payment_ref);
   const sum = (st) => all.filter((r) => r.status === st).reduce((a, r) => a + Number(r.amount), 0);
   const votesOf = (st) => all.filter((r) => r.status === st).reduce((a, r) => a + r.quantity, 0);
 
@@ -974,24 +1008,34 @@ async function tabCreditPayments(main) {
       stat(String(votesOf('approved')), 'Votes sold'),
       stat(money(sum('pending'), ev.currency), 'Awaiting review'),
       stat(String(all.filter((r) => r.status === 'pending').length), 'Pending payments')),
-    rows.length ? h('div.table-wrap', h('table',
-      h('thead', h('tr', ['Receipt', 'Voter', 'Device', 'Votes', 'Amount', 'Reference', 'Time', 'Status', ''].map((t) => h('th', t)))),
+    rows.length ? h('div.table-wrap', h('table.pay-table',
+      h('thead', h('tr', ['Receipt', 'Voter', 'Device', 'Network', 'Votes', 'Amount', showRef ? 'Reference' : null, 'Time', 'Status', '']
+        .filter((t) => t !== null).map((t) => h('th', t)))),
       pagedBody(rows, (r) => h('tr',
         h('td', r.proof_path && signed[r.proof_path]
           ? h('img.proof-thumb', { src: signed[r.proof_path], alt: 'receipt', onclick: () => modal('Receipt', h('img', { src: signed[r.proof_path], alt: 'receipt', style: { width: '100%' } })) })
           : h('span.muted', '—')),
-        h('td', h('b', r.voters?.name || '(no name)'), h('div.muted.small', [r.voters?.email, r.voters?.phone, r.voters?.extra].filter(Boolean).join(' · '))),
-        h('td.small', h('div', `${r.voters?.device_info?.type || ''} · ${r.voters?.device_info?.os || ''}`),
-          h('div.mono.muted', { title: r.fingerprint }, `fp ${String(r.fingerprint || '').slice(0, 10)}…`),
-          h('div.mono.muted', r.ip || '')),
+        (() => {
+          const cell = voterCell(r.voters);
+          cell.append(h('div.small.usage-line', usageLine(r.voter_id)));
+          // The purchase is always on this voter's record. Note when it was sent from another browser
+          // that the anti-cheat counts as the same person, so you know why the device differs.
+          if (r.device_token && r.voters?.device_token && r.device_token !== r.voters.device_token) {
+            cell.append(h('div.small', { style: { color: 'var(--warn-ink)' } }, '⚠ Sent from another browser of this same voter'));
+          }
+          return cell;
+        })(),
+        deviceCell(r.voters),
+        networkCell(r.voters),
         h('td', h('b', r.quantity)),
         h('td', money(r.amount, ev.currency)),
-        h('td', h('span.mono', r.payment_ref || '—')),
+        showRef ? h('td', h('span.mono', r.payment_ref || '—')) : null,
         h('td.small', new Date(r.created_at).toLocaleString()),
         h('td', h('span.badge', { class: r.status }, r.status)),
         h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
           r.status !== 'approved' ? h('button.btn.ok.sm', { onclick: () => review([r.id], 'approved') }, 'Approve') : null,
-          r.status !== 'rejected' ? h('button.btn.sm', { onclick: () => review([r.id], 'rejected') }, 'Reject') : null)))))) :
+          r.status !== 'rejected' ? h('button.btn.sm', { onclick: () => review([r.id], 'rejected') }, 'Reject') : null,
+          r.voters ? h('button.btn.sm.ghost', { onclick: () => showDevice(r.voters) }, 'Details') : null)))))) :
       h('div.card', h('p.muted', `No ${filter === 'all' ? '' : filter + ' '}payments.`)));
   poll(main, () => { if (!document.querySelector('.modal-wrap')) renderTab(); }, 20000);
 }
@@ -1079,12 +1123,9 @@ async function tabVotes(main) {
           const f = flags(v);
           const vv = voterVotes(v.id);
           return h('tr', { style: v.blocked ? { opacity: 0.55 } : {} },
-            h('td', h('b', v.name || '(no name)'), v.blocked ? h('span.badge.closed', { style: { marginLeft: '.4rem' } }, 'blocked') : null,
-              h('div.muted.small', [v.email, v.phone, v.extra].filter(Boolean).join(' · ')),
-              h('div.muted.small', new Date(v.created_at).toLocaleString())),
-            h('td.small', h('div', `${v.device_info?.type || ''} · ${v.device_info?.os || ''}`), h('div.muted', v.device_info?.model || v.device_info?.browser || ''),
-              h('div.mono.muted', { title: v.fingerprint }, `fp ${String(v.fingerprint).slice(0, 10)}…`)),
-            h('td.small.mono', v.ip || '—'),
+            voterCell(v),
+            deviceCell(v),
+            networkCell(v),
             h('td.small', vv.map((x) => `${x.contestants?.name || '?'}${x.quantity > 1 ? ' ×' + x.quantity : ''}${x.status === 'pending' ? ' (pending)' : ''}`).join(', ') || '—',
               creditLabel(v.id)),
             h('td.small', f.length ? f.map((t) => h('div', { style: { color: 'var(--warn-ink)' } }, '⚠ ' + t)) : h('span.muted', '—')),

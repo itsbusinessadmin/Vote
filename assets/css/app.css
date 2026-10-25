@@ -595,3 +595,6 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
 .rules-modal .rules-section { background: none; border: 0; box-shadow: none; padding: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .rules-modal .rules-section .section-head .step, .rules-modal .rules-section .section-head .card-title { display: none; }
 .rules-modal .rules-section .section-head p { margin: 0; }
+.usage-line { margin-top: .3rem; color: var(--brand-text); font-weight: 600; }
+.pay-table td:nth-child(2) { min-width: 240px; }
+.pay-table td:nth-child(3) { min-width: 150px; }
