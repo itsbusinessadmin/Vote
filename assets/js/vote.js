@@ -364,7 +364,6 @@ function openBuyCredits() {
       event.payment_qr_url
         ? h('div.qr-frame', h('img', { src: event.payment_qr_url, alt: 'Payment QR code' }), h('small', 'Scan with GCash, Maya or your bank app'))
         : h('p.notice', 'The organizer has not added a payment QR code yet.'),
-      event.payment_instructions ? h('p.small', { style: { whiteSpace: 'pre-line' } }, event.payment_instructions) : null,
       h('p.confirm-note', icon('clock', 18), h('span', 'Your extra votes are added once the organizer confirms your payment.')));
   };
 
