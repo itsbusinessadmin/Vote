@@ -1009,7 +1009,7 @@ async function tabCreditPayments(main) {
       stat(money(sum('pending'), ev.currency), 'Awaiting review'),
       stat(String(all.filter((r) => r.status === 'pending').length), 'Pending payments')),
     rows.length ? h('div.table-wrap', h('table.pay-table',
-      h('thead', h('tr', ['Receipt', 'Voter', 'Device', 'Network', 'Votes', 'Amount', showRef ? 'Reference' : null, 'Time', 'Status', '']
+      h('thead', h('tr', ['Receipt', 'Voter', 'Paid from device', 'Paid from IP', 'Votes', 'Amount', showRef ? 'Reference' : null, 'Time', 'Status', '']
         .filter((t) => t !== null).map((t) => h('th', t)))),
       pagedBody(rows, (r) => h('tr',
         h('td', r.proof_path && signed[r.proof_path]
@@ -1018,15 +1018,11 @@ async function tabCreditPayments(main) {
         (() => {
           const cell = voterCell(r.voters);
           cell.append(h('div.small.usage-line', usageLine(r.voter_id)));
-          // The purchase is always on this voter's record. Note when it was sent from another browser
-          // that the anti-cheat counts as the same person, so you know why the device differs.
-          if (r.device_token && r.voters?.device_token && r.device_token !== r.voters.device_token) {
-            cell.append(h('div.small', { style: { color: 'var(--warn-ink)' } }, '⚠ Sent from another browser of this same voter'));
-          }
           return cell;
         })(),
-        deviceCell(r.voters),
-        networkCell(r.voters),
+        paidFromCell(r),
+        h('td.small.mono', r.ip || '—',
+          r.voters?.ip && r.ip && r.voters.ip !== r.ip ? h('div.muted', `voted from ${r.voters.ip}`) : null),
         h('td', h('b', r.quantity)),
         h('td', money(r.amount, ev.currency)),
         showRef ? h('td', h('span.mono', r.payment_ref || '—')) : null,
@@ -1035,7 +1031,7 @@ async function tabCreditPayments(main) {
         h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
           r.status !== 'approved' ? h('button.btn.ok.sm', { onclick: () => review([r.id], 'approved') }, 'Approve') : null,
           r.status !== 'rejected' ? h('button.btn.sm', { onclick: () => review([r.id], 'rejected') }, 'Reject') : null,
-          r.voters ? h('button.btn.sm.ghost', { onclick: () => showDevice(r.voters) }, 'Details') : null)))))) :
+          r.voters ? h('button.btn.sm.ghost', { onclick: () => showPurchaseDevice(r) }, 'Details') : null)))))) :
       h('div.card', h('p.muted', `No ${filter === 'all' ? '' : filter + ' '}payments.`)));
   poll(main, () => { if (!document.querySelector('.modal-wrap')) renderTab(); }, 20000);
 }
@@ -1201,6 +1197,49 @@ function countBy(list, key) {
   const m = {};
   for (const x of list) if (x[key]) m[x[key]] = (m[x[key]] || 0) + 1;
   return m;
+}
+
+// How the device a purchase was sent from compares with the device the
+// voter voted with (the voter record).
+function deviceMatch(r) {
+  const v = r.voters || {};
+  if (r.device_token && r.device_token === v.device_token) return ['ok', '✓ Same browser it voted with'];
+  if (r.fingerprint && r.fingerprint === v.fingerprint) return ['ok', '✓ Same device it voted with'];
+  return ['warn', '⚠ Different device from the one it voted with. Linked to this voter by the anti-cheat (same computer and network, or same contact).'];
+}
+
+function paidFromCell(r) {
+  const d = r.device_info || {};
+  const [kind, text] = deviceMatch(r);
+  return h('td.small',
+    h('div', `${d.type || '?'} · ${d.os || '?'}`),
+    h('div.muted', d.model || d.browser || ''),
+    h('div.mono.muted', { title: r.fingerprint || '' }, `fp ${String(r.fingerprint || '').slice(0, 10)}…`),
+    h('div.match-tag', { class: kind }, text));
+}
+
+// Side by side: the device the purchase came from and the device the voter voted with.
+function showPurchaseDevice(r) {
+  const v = r.voters || {}, pd = r.device_info || {}, vd = v.device_info || {};
+  const rows = [
+    ['Device type', pd.type, vd.type], ['Operating system', pd.os, vd.os], ['Model', pd.model, vd.model], ['Browser', pd.browser, vd.browser],
+    ['Screen', pd.screen, vd.screen], ['GPU', pd.gpu, vd.gpu], ['CPU cores', pd.cores, vd.cores], ['Memory (GB)', pd.memory_gb, vd.memory_gb],
+    ['Time zone', pd.timezone, vd.timezone], ['Language', pd.language, vd.language], ['Private window (guess)', pd.private_mode_guess, vd.private_mode_guess],
+    ['IP address', r.ip, v.ip], ['Fingerprint', r.fingerprint, v.fingerprint], ['Browser token', r.device_token, v.device_token],
+    ['Same-computer id', r.cross_id, v.cross_id], ['User agent', r.user_agent, v.user_agent],
+    ['Time', new Date(r.created_at).toLocaleString(), v.created_at ? `first vote ${new Date(v.created_at).toLocaleString()}` : null],
+  ];
+  const [kind, text] = deviceMatch(r);
+  modal(`${v.name || 'Voter'} · ${r.quantity} vote${r.quantity === 1 ? '' : 's'}`, h('div.stack',
+    h('p.match-tag', { class: kind }, text),
+    h('div.table-wrap', h('table',
+      h('thead', h('tr', h('th', ''), h('th', 'Paid from'), h('th', 'Voted with'))),
+      h('tbody', rows.map(([label, a, b]) => {
+        const same = a != null && b != null && String(a) === String(b);
+        return h('tr', h('th', label),
+          h('td.small', { style: { wordBreak: 'break-all' } }, String(a ?? '—')),
+          h('td.small', { style: { wordBreak: 'break-all' }, class: label === 'Time' ? '' : same ? 'same' : (a != null && b != null ? 'differs' : '') }, String(b ?? '—')));
+      }))))), [], { className: 'device-compare' });
 }
 
 function showDevice(v) {

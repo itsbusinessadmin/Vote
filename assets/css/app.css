@@ -598,3 +598,12 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
 .usage-line { margin-top: .3rem; color: var(--brand-text); font-weight: 600; }
 .pay-table td:nth-child(2) { min-width: 240px; }
 .pay-table td:nth-child(3) { min-width: 150px; }
+.match-tag { margin-top: .3rem; font-size: .75rem; font-weight: 700; line-height: 1.3; }
+.match-tag.ok { color: var(--ok-ink); }
+.match-tag.warn { color: var(--warn-ink); }
+p.match-tag { margin: 0; font-size: .88rem; padding: .5rem .7rem; border-radius: 10px; }
+p.match-tag.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+p.match-tag.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.device-compare { width: min(760px, 100%); }
+.device-compare td.same { color: var(--ok-ink); }
+.device-compare td.differs { color: var(--warn-ink); font-weight: 700; }

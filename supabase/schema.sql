@@ -224,6 +224,11 @@ create table if not exists public.credit_purchases (
 create index if not exists credit_purchases_event_idx on public.credit_purchases (event_id, status);
 create index if not exists credit_purchases_voter_idx on public.credit_purchases (voter_id, status);
 
+-- The device the purchase was sent from (shown to the admin next to the
+-- device the voter voted with).
+alter table public.credit_purchases add column if not exists cross_id text;
+alter table public.credit_purchases add column if not exists device_info jsonb;
+
 -- Votes cast with bought credits (after the free votes ran out).
 alter table public.votes add column if not exists from_credits boolean not null default false;
 
@@ -674,8 +679,10 @@ begin
       'message', 'You already have 5 payments waiting for confirmation. Please wait for the organizer to review them.');
   end if;
 
-  insert into public.credit_purchases (event_id, voter_id, quantity, amount, payment_ref, proof_path, fingerprint, device_token, ip, user_agent)
-  values (e.id, v_voter, v_qty, v_qty * e.credits_price, v_ref, v_proof, v_fp, v_tok, v_ip, v_ua);
+  insert into public.credit_purchases (event_id, voter_id, quantity, amount, payment_ref, proof_path,
+                                       fingerprint, cross_id, device_token, ip, user_agent, device_info)
+  values (e.id, v_voter, v_qty, v_qty * e.credits_price, v_ref, v_proof,
+          v_fp, nullif(v_cross, ''), v_tok, v_ip, v_ua, p_voter -> 'device_info');
   update public.voters set last_seen_at = now() where id = v_voter;
 
   return jsonb_build_object('ok', true, 'code', 'OK');
