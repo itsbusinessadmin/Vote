@@ -308,7 +308,7 @@ function render() {
     h('div.credits-actions',
       purchases.length ? h('button.notify-btn', { type: 'button', onclick: openPurchases,
         'aria-label': `My purchases${pending ? `, ${purchases.filter((p) => p.status === 'pending').length} pending` : ''}` },
-        icon('bell', 20),
+        icon('coins', 20),
         pending ? h('span.notify-dot', { 'aria-hidden': 'true' }, purchases.filter((p) => p.status === 'pending').length) : null) : null,
       h('button.btn.primary.sm', { type: 'button', onclick: openBuyCredits }, icon('shopping-bag', 16), event.credits_button || CREDITS_DEFAULTS.button))) : null;
 
