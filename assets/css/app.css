@@ -627,3 +627,10 @@ label.setting-row { cursor: pointer; }
 .switch input:checked + i { background: var(--ok); }
 .switch input:checked + i::after { transform: translateX(20px); }
 .switch input:focus-visible + i { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* Payments: select mode */
+.select-bar { position: sticky; top: 76px; z-index: 15; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem;
+  padding: .6rem .8rem; border-radius: 14px; background: color-mix(in srgb, var(--brand) 12%, var(--surface-solid));
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent); box-shadow: var(--shadow); }
+.select-cell { width: 44px; text-align: center; }
+.select-cell input { width: 18px; height: 18px; accent-color: var(--brand); cursor: pointer; }
+tr.is-selected td { background: color-mix(in srgb, var(--brand) 7%, transparent); }

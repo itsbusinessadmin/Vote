@@ -952,6 +952,9 @@ const networkCell = (v) => h('td.small.mono', v?.ip || '—');
 // Payments for "Free + paid" events: voters who used their free votes and
 // bought more. Approving a purchase adds its votes to that voter right away;
 // their page picks it up within seconds.
+// Selection mode in Payments: the ids picked, or null when not selecting.
+let paySelection = null;
+
 async function tabCreditPayments(main) {
   const filter = localStorage.getItem('pay_filter') || 'pending';
   const [all, votes] = await Promise.all([
@@ -998,14 +1001,63 @@ async function tabCreditPayments(main) {
 
   const filterSel = select({ f: filter }, 'f', [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']]);
   filterSel.setAttribute('aria-label', 'Show payments');
-  filterSel.addEventListener('change', (e) => { localStorage.setItem('pay_filter', e.target.value); renderTab(); });
+  filterSel.addEventListener('change', (e) => { localStorage.setItem('pay_filter', e.target.value); paySelection = null; renderTab(); });
+
+  // Select mode: a checkbox on each row and a bar with Select all, Approve
+  // (Pending view only), Delete and Cancel.
+  if (paySelection && paySelection.filter !== filter) paySelection = null;
+  const selecting = !!paySelection;
+  if (selecting) for (const id of [...paySelection.ids]) if (!rows.some((r) => r.id === id)) paySelection.ids.delete(id);
+  const checks = new Map();
+  const selCount = h('b');
+  const selectAllBtn = h('button.btn.sm', { type: 'button', onclick: () => {
+    const all = paySelection.ids.size === rows.length;
+    paySelection.ids = new Set(all ? [] : rows.map((r) => r.id));
+    for (const [id, cb] of checks) { cb.checked = paySelection.ids.has(id); cb.closest('tr')?.classList.toggle('is-selected', cb.checked); }
+    updateBar();
+  } });
+  const approveSel = h('button.btn.ok.sm', { type: 'button', onclick: async () => {
+    const ids = [...paySelection.ids];
+    if (!(await confirmBox('Approve selected?', `Approve ${ids.length} payment${ids.length === 1 ? '' : 's'}? Their votes are added to those voters right away.`, 'Approve'))) return;
+    paySelection = null;
+    review(ids, 'approved');
+  } }, 'Approve');
+  const deleteSel = h('button.btn.danger.sm', { type: 'button', onclick: async () => {
+    const picked = rows.filter((r) => paySelection.ids.has(r.id));
+    const approvedVotes = picked.filter((r) => r.status === 'approved').reduce((a, r) => a + r.quantity, 0);
+    const msg = `Permanently delete ${picked.length} payment${picked.length === 1 ? '' : 's'} and their receipts? This cannot be undone.` +
+      (approvedVotes ? ` ${approvedVotes} confirmed vote${approvedVotes === 1 ? ' is' : 's are'} taken back from those voters' credits; votes they already cast stay counted.` : '');
+    if (!(await confirmBox('Delete payments?', msg, 'Delete', true))) return;
+    const { error } = await sb.from('credit_purchases').delete().in('id', picked.map((r) => r.id));
+    if (error) return toast(error.message, 'error');
+    deleteProofs(picked.map((r) => r.proof_path));
+    toast(`Deleted ${picked.length} payment${picked.length === 1 ? '' : 's'}`, 'success');
+    paySelection = null;
+    countPending();
+    renderTab();
+  } }, icon('trash-2', 16), 'Delete');
+  function updateBar() {
+    const n = paySelection.ids.size;
+    selCount.textContent = `${n} selected`;
+    selectAllBtn.textContent = n === rows.length ? 'Unselect all' : 'Select all';
+    approveSel.disabled = deleteSel.disabled = n === 0;
+  }
+  const selectBar = selecting ? h('div.select-bar', { role: 'toolbar', 'aria-label': 'Selected payments' },
+    selCount, h('div.grow'), selectAllBtn, filter === 'pending' ? approveSel : null, deleteSel,
+    h('button.btn.sm.ghost', { type: 'button', onclick: () => { paySelection = null; renderTab(); } }, 'Cancel')) : null;
+  if (selecting) updateBar();
+  const selectCell = (r) => {
+    const cb = h('input', { type: 'checkbox', checked: paySelection.ids.has(r.id), 'aria-label': `Select ${r.voters?.name || 'payment'}`,
+      onchange: () => { cb.checked ? paySelection.ids.add(r.id) : paySelection.ids.delete(r.id); cb.closest('tr')?.classList.toggle('is-selected', cb.checked); updateBar(); } });
+    checks.set(r.id, cb);
+    return h('td.select-cell', cb);
+  };
 
   fill(main,
     header('Payments',
       filterSel,
-      filter === 'pending' && rows.length ? h('button.btn.ok.sm', { onclick: async () => {
-        if (await confirmBox('Approve all?', `Approve all ${rows.length} pending purchases? Their votes are added right away.`, 'Approve all')) review(rows.map((r) => r.id), 'approved');
-      } }, 'Approve all') : null),
+      rows.length && !selecting ? h('button.btn.sm', { type: 'button', onclick: () => { paySelection = { filter, ids: new Set() }; renderTab(); } }, 'Select') : null),
+    selectBar,
     h('p.small.muted.section', 'Votes bought by voters who used up their free votes. Check each payment in your GCash / Maya / bank app, then approve it. The votes go to the same device or browser that bought them.'),
     h('div.stats',
       stat(money(sum('approved'), ev.currency), 'Approved total'),
@@ -1013,9 +1065,11 @@ async function tabCreditPayments(main) {
       stat(money(sum('pending'), ev.currency), 'Awaiting review'),
       stat(String(all.filter((r) => r.status === 'pending').length), 'Pending payments')),
     rows.length ? h('div.table-wrap', h('table.pay-table',
-      h('thead', h('tr', ['Receipt', 'Voter', 'Paid from device', 'Paid from IP', 'Votes', 'Amount', showRef ? 'Reference' : null, 'Time', 'Status', '']
-        .filter((t) => t !== null).map((t) => h('th', t)))),
-      pagedBody(rows, (r) => h('tr',
+      h('thead', h('tr', selecting ? h('th.select-cell', h('span.sr-only', 'Select')) : null,
+        ['Receipt', 'Voter', 'Paid from device', 'Paid from IP', 'Votes', 'Amount', showRef ? 'Reference' : null, 'Time', 'Status', selecting ? null : '']
+          .filter((t) => t !== null).map((t) => h('th', t)))),
+      pagedBody(rows, (r) => h('tr', { class: selecting && paySelection.ids.has(r.id) ? 'is-selected' : '' },
+        selecting ? selectCell(r) : null,
         h('td', r.proof_path && signed[r.proof_path]
           ? h('img.proof-thumb', { src: signed[r.proof_path], alt: 'receipt', onclick: () => modal('Receipt', h('img', { src: signed[r.proof_path], alt: 'receipt', style: { width: '100%' } })) })
           : h('span.muted', '—')),
@@ -1032,12 +1086,12 @@ async function tabCreditPayments(main) {
         showRef ? h('td', h('span.mono', r.payment_ref || '—')) : null,
         h('td.small', new Date(r.created_at).toLocaleString()),
         h('td', h('span.badge', { class: r.status }, r.status)),
-        h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
+        selecting ? null : h('td', h('div.row', { style: { flexWrap: 'nowrap' } },
           r.status !== 'approved' ? h('button.btn.ok.sm', { onclick: () => review([r.id], 'approved') }, 'Approve') : null,
           r.status !== 'rejected' ? h('button.btn.sm', { onclick: () => review([r.id], 'rejected') }, 'Reject') : null,
           r.voters ? h('button.btn.sm.ghost', { onclick: () => showPurchaseDevice(r) }, 'Details') : null)))))) :
       h('div.card', h('p.muted', `No ${filter === 'all' ? '' : filter + ' '}payments.`)));
-  poll(main, () => { if (!document.querySelector('.modal-wrap')) renderTab(); }, 20000);
+  poll(main, () => { if (!paySelection && !document.querySelector('.modal-wrap')) renderTab(); }, 20000);
 }
 
 // Big tables render PAGE rows at a time, with a "Show more" row at the end.
