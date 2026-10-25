@@ -311,8 +311,7 @@ function render() {
     h('b', event.title),
     remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null);
 
-  fill(app, topbar, hero, head, h('main.wrap', info, seg, content),
-    h('footer.footer', 'Votes are protected against duplicates and spam.'));
+  fill(app, topbar, hero, head, h('main.wrap', info, seg, content));
   // Watch the title only once it is on the page.
   heroObserver?.disconnect();
   heroObserver = new IntersectionObserver(([e]) => topbar.classList.toggle('show', !e.isIntersecting), { rootMargin: '-40px 0px 0px 0px' });
