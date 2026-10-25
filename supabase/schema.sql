@@ -368,7 +368,7 @@ begin
     v_code := 'PRIVATE'; v_msg := 'Private / incognito windows cannot vote. Please open the link in a normal window.';
   elsif e.desktop_only and (coalesce(p_voter -> 'device_info' ->> 'type', '') <> 'Desktop / Laptop'
                             or v_ua ~* '(Mobi|iPhone|iPad|iPod|Android|Tablet|Silk|Kindle)') then
-    v_code := 'DESKTOP_ONLY'; v_msg := 'Voting for this event only works on a desktop or laptop computer.';
+    v_code := 'DESKTOP_ONLY'; v_msg := 'To keep the vote fair and prevent cheating, votes can''t be cast from this device.';
   elsif e.require_name and length(v_norm) < 2 then
     v_code := 'NAME_REQUIRED'; v_msg := 'Please enter your name.';
   elsif e.ask_email and v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then

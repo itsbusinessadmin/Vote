@@ -172,21 +172,17 @@ function disclosure(key, title, ...body) {
 }
 
 // Shown instead of the voting page on phones and tablets when the event is
-// set to "desktop or laptop only".
+// set to "desktop or laptop only". Worded as the anti-cheat block it is.
 function renderComputerOnly() {
   heroObserver?.disconnect();
-  const link = location.href;
   fill(app,
     event.banner_url ? h('header.hero.has-banner',
       h('img.banner-fill', { src: event.banner_url, alt: '', 'aria-hidden': 'true' }),
       h('img.banner-img', { src: event.banner_url, alt: '' })) : h('header.hero.plain'),
     h('main.event-head', h('div.event-card.computer-only',
-      h('div.computer-icon', icon('monitor', 30)),
-      h('h1', 'Please use a computer'),
-      h('p', `Voting for ${event.title} only works on a desktop or laptop computer. Open this link on your computer to vote.`),
-      h('code', link),
-      h('button.btn.primary', { type: 'button', onclick: () => navigator.clipboard.writeText(link)
-        .then(() => toast('Link copied', 'success'), () => toast('Could not copy. Select the link and copy it manually.', 'error')) }, 'Copy link'))));
+      h('div.computer-icon', icon('shield-check', 30)),
+      h('h1', 'Voting unavailable on this device'),
+      h('p', `To keep ${event.title} fair and prevent cheating, votes can't be cast from this device.`))));
 }
 
 function render() {
