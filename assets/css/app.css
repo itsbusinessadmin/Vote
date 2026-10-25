@@ -569,3 +569,10 @@ details.more > summary { cursor: pointer; font-weight: 600; font-size: .9rem; co
 .purchase.approved .purchase-icon, .purchase.approved .purchase-status { color: var(--ok-ink); background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .purchase.rejected .purchase-icon, .purchase.rejected .purchase-status { color: var(--bad-ink); background: color-mix(in srgb, var(--bad) 12%, transparent); }
 @media (max-width: 420px) { .credits-actions { width: 100%; } .credits-actions .btn { flex: 1; } }
+.buy-pill { display: inline-flex; align-items: center; gap: .3rem; font: inherit; font-size: .8rem; font-weight: 800; white-space: nowrap;
+  padding: .3rem .75rem; border: 0; border-radius: 999px; cursor: pointer; color: #fff;
+  background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #ec4899));
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--brand) 35%, transparent); transition: transform .15s var(--ease); }
+.buy-pill:hover { transform: translateY(-1px); }
+.buy-pill:active { transform: scale(.95); }
+.topbar .buy-pill { padding: .2rem .65rem; font-size: .78rem; }

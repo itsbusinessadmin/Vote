@@ -214,6 +214,11 @@ function render() {
       h('img.banner-img', { src: event.banner_url, alt: '', fetchpriority: 'high' }))
     : h('header.hero.plain');
 
+  // Free + paid: a small Buy button sits beside "0 votes left".
+  const canBuy = event.pricing === 'free_paid' && event.credits_enabled !== false && state.open && !myStatus?.blocked && remaining === 0;
+  const buyPill = () => canBuy ? h('button.buy-pill', { type: 'button', onclick: openBuyCredits },
+    icon('shopping-bag', 14), event.credits_button || CREDITS_DEFAULTS.button) : null;
+
   const head = h('section.event-head',
     h('div.event-card',
       event.logo_url ? h('img.logo', { src: event.logo_url, alt: `${event.title} logo`, width: 72, height: 72 }) : null,
@@ -223,7 +228,8 @@ function render() {
         h('div.pills',
           h('span.pill.status', { class: state.open ? 'open' : 'closed' }, h('i', { 'aria-hidden': 'true' }), state.open ? 'Voting open' : state.text),
           myStatus?.blocked ? h('span.pill.bad', 'This device is blocked')
-            : remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null))));
+            : remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null,
+          buyPill()))));
 
   const info = h('section.info',
     event.description ? h('p.lead', event.description) : null,
@@ -317,15 +323,20 @@ function render() {
       empty);
 
   // iOS-style: a compact glass title bar slides in once the big title is gone.
-  const topbar = h('div.topbar', { 'aria-hidden': 'true' },
+  // Hidden from keyboards and screen readers until it slides in.
+  const topbar = h('div.topbar', { inert: true },
     event.logo_url ? h('img', { src: event.logo_url, alt: '' }) : null,
     h('b', event.title),
-    remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null);
+    remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null,
+    buyPill());
 
   fill(app, topbar, hero, head, h('main.wrap', info, seg, content));
   // Watch the title only once it is on the page.
   heroObserver?.disconnect();
-  heroObserver = new IntersectionObserver(([e]) => topbar.classList.toggle('show', !e.isIntersecting), { rootMargin: '-40px 0px 0px 0px' });
+  heroObserver = new IntersectionObserver(([e]) => {
+    topbar.classList.toggle('show', !e.isIntersecting);
+    topbar.inert = e.isIntersecting;
+  }, { rootMargin: '-40px 0px 0px 0px' });
   heroObserver.observe(head);
 }
 
