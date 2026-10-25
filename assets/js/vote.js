@@ -496,7 +496,7 @@ function openBuyCredits() {
       h('p.muted.small', `${plural(n, 'vote')} will be added to this device as soon as the organizer confirms your payment. You can keep this page open; it updates by itself.`)));
 
   pickStep();
-  modal('Buy vote credits', box, [{ label: 'Close', value: null }]);
+  modal('Buy vote credits', box);
 }
 
 // ---------------------------------------------------------------------
