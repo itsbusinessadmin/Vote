@@ -436,32 +436,27 @@ function openBuyCredits() {
   const payStep = (n) => {
     if (n < 1) return;
     let proofFile = null;
-    const ref = h('input#credits-ref', { type: 'text', placeholder: 'Payment reference no. (e.g. GCash)', autocomplete: 'off',
-      'aria-label': 'Payment reference number' });
-    const proofName = h('span.muted.small#credits-proof-name', { 'aria-live': 'polite' }, 'No file chosen');
+    const proofName = h('span.small#credits-proof-name', { 'aria-live': 'polite' }, 'No receipt yet');
+    const proofBtn = h('button.btn.sm', { type: 'button', 'aria-describedby': 'credits-proof-name', onclick: () => proofInput.click() },
+      icon('upload', 16), 'Upload receipt screenshot');
     const proofInput = h('input', { type: 'file', accept: 'image/*', class: 'hidden', tabIndex: -1, onchange: (e) => {
       proofFile = e.target.files[0] || null;
-      proofName.textContent = proofFile ? proofFile.name : 'No file chosen';
+      proofName.textContent = proofFile ? proofFile.name : 'No receipt yet';
+      fieldError(proofBtn, '');
     } });
     const submit = h('button.checkout-btn', { type: 'button', onclick: async () => {
-      fieldError(ref, '');
-      if (!ref.value.trim() && !proofFile) { fieldError(ref, 'Enter the reference number or upload your receipt.'); return; }
+      fieldError(proofBtn, '');
+      if (!proofFile) { fieldError(proofBtn, 'Upload a screenshot of your payment receipt.'); return; }
       submit.disabled = true;
       submit.setAttribute('aria-busy', 'true');
       try {
         await devicePromise;
-        let proofPath = null;
-        if (proofFile) proofPath = await uploadImage('proofs', `${event.id}/credits`, proofFile, 1600);
+        const proofPath = await uploadImage('proofs', `${event.id}/credits`, proofFile, 1600);
         const { data, error } = await sb.rpc('buy_credits', {
-          p_event_id: event.id, p_voter: voterPayload(), p_quantity: n,
-          p_payment_ref: ref.value.trim() || null, p_proof_path: proofPath,
+          p_event_id: event.id, p_voter: voterPayload(), p_quantity: n, p_payment_ref: null, p_proof_path: proofPath,
         });
         if (error) throw error;
-        if (!data.ok) {
-          if (data.code === 'PAYMENT_REQUIRED') fieldError(ref, data.message);
-          else toast(data.message, 'error');
-          return;
-        }
+        if (!data.ok) { toast(data.message, 'error'); return; }
         await refreshStatus();
         render();
         doneStep(n);
@@ -481,13 +476,11 @@ function openBuyCredits() {
       event.payment_qr_url
         ? h('div.qr-frame', h('img', { src: event.payment_qr_url, alt: 'Payment QR code' }), h('small', 'Scan with GCash, Maya or your bank app'))
         : h('p.notice', 'The organizer has not added a payment QR code yet.'),
-      h('div.field', ref),
-      h('div.row',
-        h('button.btn.sm', { type: 'button', 'aria-describedby': 'credits-proof-name', onclick: () => proofInput.click() }, icon('upload', 16), 'Upload receipt'),
-        proofInput, proofName),
+      h('div.field', h('div.row', proofBtn, proofInput, proofName)),
       h('p.confirm-note', icon('clock', 18), h('span', 'Your extra votes are added once the organizer confirms your payment.')),
       submit);
   };
+
 
   // Step 3: sent. The votes appear on this device once approved.
   const doneStep = (n) => fill(box,
