@@ -214,7 +214,7 @@ function render() {
       h('img.banner-img', { src: event.banner_url, alt: '', fetchpriority: 'high' }))
     : h('header.hero.plain');
 
-  // Free + paid: a small Buy button sits beside "0 votes left".
+  // Free + paid: a small Buy button sits beside "0 votes left" in the compact top bar.
   const canBuy = event.pricing === 'free_paid' && event.credits_enabled !== false && state.open && !myStatus?.blocked && remaining === 0;
   const buyPill = () => canBuy ? h('button.buy-pill', { type: 'button', onclick: openBuyCredits },
     event.credits_button || CREDITS_DEFAULTS.button) : null;
@@ -228,8 +228,7 @@ function render() {
         h('div.pills',
           h('span.pill.status', { class: state.open ? 'open' : 'closed' }, h('i', { 'aria-hidden': 'true' }), state.open ? 'Voting open' : state.text),
           myStatus?.blocked ? h('span.pill.bad', 'This device is blocked')
-            : remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null,
-          buyPill()))));
+            : remaining != null ? h('span.pill', `${plural(remaining, 'vote')} left`) : null))));
 
   const info = h('section.info',
     event.description ? h('p.lead', event.description) : null,
