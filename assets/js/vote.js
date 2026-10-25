@@ -2,6 +2,7 @@ import { sb, configured, $, h, fill, icon, fieldError, toast, modal, money, setT
 import { getDevice, formFactor } from './device.js';
 import { standingsList, initials } from './standings.js';
 import { rulesList } from './rules.js';
+import { CREDITS_DEFAULTS } from './credits.js';
 
 const app = $('#app');
 const ID_KEY = 'vote_identity';
@@ -267,13 +268,13 @@ function render() {
       } })) : null;
 
   // Shown above the contestants once this voter has used every vote.
-  const outOfVotes = state.open && !myStatus?.blocked && remaining === 0;
+  const outOfVotes = event.credits_enabled !== false && state.open && !myStatus?.blocked && remaining === 0;
   const creditsNotice = outOfVotes ? h('div.credits-notice', { role: 'status' },
     h('span.credits-icon', { 'aria-hidden': 'true' }, icon('shopping-bag', 24)),
     h('div.credits-text',
-      h('b', "You've used all your votes"),
-      h('span', 'Buy vote credits to keep supporting your favorites.')),
-    h('button.btn.primary.sm', { type: 'button', onclick: openBuyCredits }, icon('shopping-bag', 16), 'Buy credits')) : null;
+      h('b', event.credits_title || CREDITS_DEFAULTS.title),
+      h('span', event.credits_message || CREDITS_DEFAULTS.message)),
+    h('button.btn.primary.sm', { type: 'button', onclick: openBuyCredits }, icon('shopping-bag', 16), event.credits_button || CREDITS_DEFAULTS.button)) : null;
 
   const content = view === 'standings'
     ? h('section.standings-view', h('div#results',
@@ -316,7 +317,7 @@ async function loadResults() {
 // Buy credits pop-up: how to pay the organizer for more votes
 // ---------------------------------------------------------------------
 function openBuyCredits() {
-  const price = Number(event.price_per_vote) > 0 ? Number(event.price_per_vote) : 1;
+  const price = event.credits_price != null ? Number(event.credits_price) : 1;
   const maxQty = Math.max(1, Number(event.max_qty_per_vote) || 1000);
   const box = h('div.credits');
 

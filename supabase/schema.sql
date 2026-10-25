@@ -147,6 +147,12 @@ alter table public.events add column if not exists email_domains text;
 alter table public.events add column if not exists block_private boolean not null default false;
 alter table public.events add column if not exists desktop_only boolean not null default false;
 alter table public.events add column if not exists max_voters_per_network int not null default 0 check (max_voters_per_network >= 0);
+-- "Buy more votes" notice shown to voters who have used every vote
+alter table public.events add column if not exists credits_enabled boolean not null default true;
+alter table public.events add column if not exists credits_price numeric(12, 2) not null default 1 check (credits_price >= 0);
+alter table public.events add column if not exists credits_title text;
+alter table public.events add column if not exists credits_message text;
+alter table public.events add column if not exists credits_button text;
 
 create index if not exists voters_fp_idx    on public.voters (event_id, fingerprint);
 create index if not exists voters_cross_idx on public.voters (event_id, cross_id);

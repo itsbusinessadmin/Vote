@@ -5,6 +5,7 @@ import {
 import * as config from './config.js';
 import { getDevice } from './device.js';
 import { rulesList } from './rules.js';
+import { CREDITS_DEFAULTS } from './credits.js';
 import { rankResults, displayName, initials, valueLabel } from './standings.js';
 
 const app = $('#app');
@@ -633,7 +634,8 @@ const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'cur
   'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label',
   'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots',
   'block_private', 'max_voters_per_network', 'desktop_only',
-  'cooldown_seconds', 'show_live_results', 'show_vote_counts'];
+  'cooldown_seconds', 'show_live_results', 'show_vote_counts',
+  'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button'];
 
 const LIMIT_PRESETS = [
   ['One vote only', 'Each person picks one contestant, once.', { max_votes_per_voter: 1, max_contestants_per_voter: 1, allow_repeat_contestant: false }],
@@ -726,7 +728,22 @@ async function tabRules(main, draft) {
         check(d, 'require_payment_proof', 'Require a reference number or receipt', 'Voters must enter a reference no. or upload a screenshot.'),
         h('p.small.muted', 'Paid votes stay "pending" until you approve them in the Payments tab. Only approved votes count.'))),
 
-    section('details', 4, 'What voters fill in', 'Asked once, before their first vote.',
+    section('credits', 4, 'Buy more votes', 'Shown above the contestants once a voter has used all their votes.',
+      check(d, 'credits_enabled', 'Let voters buy more votes', 'Shows a notice with a Buy button. Voters choose how many votes, then pay by scanning your QR code.'),
+      when(() => d.credits_enabled,
+        when(() => !(Number(d.max_votes_per_voter) > 0),
+          h('p.small.notice', 'Votes are unlimited right now, so no one runs out and this notice never shows. Set "Total votes per person" above to use it.')),
+        h('div.grid-2',
+          field('Price per vote', input(d, 'credits_price', 'number', { min: 0, step: 0.01 }), `Shown as "${money(1, d.currency || 'PHP')} = 1 vote" when the price is 1.`),
+          field('Button text', input(d, 'credits_button', 'text', { placeholder: CREDITS_DEFAULTS.button }))),
+        field('Notice title', input(d, 'credits_title', 'text', { placeholder: CREDITS_DEFAULTS.title })),
+        field('Notice message', input(d, 'credits_message', 'text', { placeholder: CREDITS_DEFAULTS.message })),
+        when(() => d.pricing !== 'paid',
+          imageUpload('Payment QR code', 'payment_qr_url', { hint: 'Voters scan this to pay. For example, your GCash / Maya / bank QR. Square, up to 900 × 900 px.', maxSide: 900 })),
+        when(() => d.pricing === 'paid', h('p.small.muted', 'Uses the payment QR code from "Free or paid" above.')),
+        h('p.small.muted', 'Leave a text blank to use the default shown in grey.'))),
+
+    section('details', 5, 'What voters fill in', 'Asked once, before their first vote.',
       check(d, 'require_name', 'Name or nickname'),
       check(d, 'ask_email', 'Email address'),
       when(() => d.ask_email, h('div.indent',
@@ -735,7 +752,7 @@ async function tabRules(main, draft) {
       check(d, 'ask_phone', 'Mobile number'),
       field('Extra question (optional)', input(d, 'extra_field_label', 'text', { placeholder: 'e.g. Student ID, Section, Table no.' }), 'Leave blank to skip.')),
 
-    section('anticheat', 5, 'Anti-cheat', 'The same browser always counts as the same voter. These add more checks.',
+    section('anticheat', 6, 'Anti-cheat', 'The same browser always counts as the same voter. These add more checks.',
       h('h3.group-title', 'Recommended'),
       check(d, 'limit_by_fingerprint', 'Same device, even in incognito',
         'Recognises a phone or PC after clearing data or in a private window. Identical phone models can occasionally look alike.'),
@@ -756,7 +773,7 @@ async function tabRules(main, draft) {
       check(d, 'block_private', 'Block private / incognito windows',
         'Incognito wipes the browser token, so blocking it removes an easy way to vote again. Detection is a best guess (mainly Chrome) and can occasionally flag a phone that is almost out of storage.')),
 
-    section('display', 6, 'Results on the voting page', null,
+    section('display', 7, 'Results on the voting page', null,
       check(d, 'show_live_results', 'Show live standings to voters'),
       when(() => d.show_live_results, h('div.indent',
         check(d, 'show_vote_counts', 'Show the number of votes', 'Off = only the ranking bars are shown.')))),
@@ -765,7 +782,7 @@ async function tabRules(main, draft) {
   const root = h('div.rules-page',
     header('Voting rules'),
     h('nav.rules-jump', { 'aria-label': 'Voting rules sections' },
-      [['ballot', 'How people vote'], ['limits', 'How many votes'], ['payment', 'Free or paid'], ['details', 'Voter details'],
+      [['ballot', 'How people vote'], ['limits', 'How many votes'], ['payment', 'Free or paid'], ['credits', 'Buy more votes'], ['details', 'Voter details'],
         ['anticheat', 'Anti-cheat'], ['display', 'Results']].map(([id, label], i) =>
         h('a', { href: `#rules-${id}`, onclick: (e) => { e.preventDefault(); $(`#rules-${id}`).scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, `${i + 1}. ${label}`))),
     h('div.rules-layout',
@@ -798,6 +815,8 @@ async function tabRules(main, draft) {
     patch.score_max = Math.min(100, Math.max(2, patch.score_max));
     patch.max_qty_per_vote = Math.max(1, patch.max_qty_per_vote);
     patch.currency = (patch.currency || 'PHP').toUpperCase().slice(0, 3);
+    patch.credits_price = Math.max(0, Number(patch.credits_price) || 0);
+    for (const k of ['credits_title', 'credits_message', 'credits_button']) patch[k] = String(patch[k] || '').trim() || null;
     patch.extra_field_label = (patch.extra_field_label || '').trim() || null;
     patch.email_domains = emailDomains(patch.email_domains).join(', ') || null;
     patch.payment_qr_url = ev.payment_qr_url; // uploaded separately from this tab
