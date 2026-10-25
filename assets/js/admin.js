@@ -304,13 +304,16 @@ function imageUpload(label, key, opts = {}) {
           if (!file) return;
           e.target.disabled = true;
           try {
+            const old = ev[key];
             const url = await uploadImage('assets', ev.id, file, maxSide);
-            if (await saveEvent({ [key]: url })) return redraw();
+            if (await saveEvent({ [key]: url })) { deleteFile(old); return redraw(); }
+            deleteFile(url); // not saved: don't keep the new file
           } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
           e.target.disabled = false;
         } }, ev[key] ? 'Change' : 'Upload'),
         ev[key] ? h('button.btn.sm.ghost', { type: 'button', onclick: async () => {
-          if (await saveEvent({ [key]: null })) redraw();
+          const old = ev[key];
+          if (await saveEvent({ [key]: null })) { deleteFile(old); redraw(); }
         } }, 'Remove') : null),
       hint ? h('small.muted', hint) : null)));
   return widget;
@@ -381,6 +384,8 @@ async function deleteEvent() {
   if (!(await confirmBox('Delete event?', `This permanently deletes "${ev.title}" and ALL of its contestants, criteria and votes.`, 'Delete', true))) return;
   const { error } = await sb.from('events').delete().eq('id', ev.id);
   if (error) return toast(error.message, 'error');
+  // The event's logo, banner, photos, videos and receipts all live under its id.
+  for (const bucket of ['assets', 'videos', 'proofs']) deleteFolder(bucket, ev.id);
   events = events.filter((e) => e.id !== ev.id);
   ev = events[0] || null;
   if (ev) localStorage.setItem('admin_event', ev.id);
@@ -411,9 +416,13 @@ async function tabContestants(main) {
         h('button.btn.sm', { onclick: () => editContestant(c) }, 'Edit'),
         h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
           if (!(await confirmBox('Delete contestant?', `Delete ${c.name} and all of their votes?`, 'Delete', true))) return;
+          // Their votes go too, so note the receipts first.
+          const { data: proofs } = await sb.from('votes').select('proof_path').eq('contestant_id', c.id).not('proof_path', 'is', null);
           const { error: err } = await sb.from('contestants').delete().eq('id', c.id);
           if (err) return toast(err.message, 'error');
-          deleteVideo(c.video_url);
+          deleteFile(c.photo_url);
+          deleteFile(c.video_url);
+          deleteProofs((proofs || []).map((x) => x.proof_path));
           renderTab();
         }, 'aria-label': `Delete ${c.name}` }, icon('trash-2', 16)))))) : h('div.card', h('p.muted', 'No contestants yet. Add your first one.')));
 }
@@ -431,10 +440,40 @@ async function reorder(table, list, i, j) {
   renderTab();
 }
 
-// Delete an uploaded video file (best effort) so it doesn't use up storage.
-function deleteVideo(url) {
-  const path = url && decodeURIComponent(url.split('/object/public/videos/')[1] || '');
-  if (path) sb.storage.from('videos').remove([path]).catch(() => {});
+// Files are removed from Supabase storage along with whatever uses them, so
+// they don't use up the free storage. Best effort: a failure never blocks
+// the delete itself.
+
+// Delete one uploaded file, given its public URL (assets, videos).
+function deleteFile(url) {
+  const m = String(url || '').match(/\/object\/public\/(assets|videos)\/(.+)$/);
+  if (m) sb.storage.from(m[1]).remove([decodeURIComponent(m[2])]).catch(() => {});
+}
+
+// Delete payment receipts (stored by path in the private proofs bucket).
+function deleteProofs(paths) {
+  paths = paths.filter(Boolean);
+  for (let i = 0; i < paths.length; i += 100) sb.storage.from('proofs').remove(paths.slice(i, i + 100)).catch(() => {});
+}
+
+// Delete everything under a folder, e.g. all of an event's files.
+async function deleteFolder(bucket, prefix) {
+  const paths = [];
+  const walk = async (dir) => {
+    for (let offset = 0; ; offset += 1000) {
+      const { data } = await sb.storage.from(bucket).list(dir, { limit: 1000, offset });
+      if (!data?.length) break;
+      for (const f of data) {
+        if (f.id) paths.push(`${dir}/${f.name}`);
+        else await walk(`${dir}/${f.name}`); // a sub-folder
+      }
+      if (data.length < 1000) break;
+    }
+  };
+  try {
+    await walk(prefix);
+    for (let i = 0; i < paths.length; i += 100) await sb.storage.from(bucket).remove(paths.slice(i, i + 100));
+  } catch {}
 }
 
 async function editContestant(c, order = 0) {
@@ -456,7 +495,7 @@ async function editContestant(c, order = 0) {
             const st = videoBox.querySelector('[role=status]');
             if (st && st.textContent !== msg) st.textContent = msg;
           });
-          if (d.video_url && d.video_url !== c?.video_url) deleteVideo(d.video_url); // unsaved earlier upload
+          if (d.video_url && d.video_url !== c?.video_url) deleteFile(d.video_url); // unsaved earlier upload
           d.video_url = url;
           uploading = false;
           drawVideo('Video uploaded');
@@ -467,7 +506,7 @@ async function editContestant(c, order = 0) {
         }
       } }, icon('upload', 16), d.video_url ? 'Replace video' : 'Upload video'),
       d.video_url && !uploading ? h('button.btn.sm.ghost', { type: 'button', onclick: () => {
-        if (d.video_url !== c?.video_url) deleteVideo(d.video_url); // never saved, safe to delete now
+        if (d.video_url !== c?.video_url) deleteFile(d.video_url); // never saved, safe to delete now
         d.video_url = null; drawVideo('');
       } }, 'Remove video') : null,
       h('span.small.muted', { role: 'status' }, status || (d.video_url ? '' : 'No video'))));
@@ -480,13 +519,18 @@ async function editContestant(c, order = 0) {
         if (!f) return;
         e.target.disabled = true;
         try {
-          d.photo_url = await uploadImage('assets', `${ev.id}/contestants`, f, 900);
+          const url = await uploadImage('assets', `${ev.id}/contestants`, f, 900);
+          if (d.photo_url && d.photo_url !== c?.photo_url) deleteFile(d.photo_url); // unsaved earlier upload
+          d.photo_url = url;
           Object.assign(prev.style, { backgroundImage: `url("${d.photo_url}")`, backgroundSize: 'cover' });
           prev.textContent = '';
         } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
         e.target.disabled = false;
       } }, 'Upload photo'),
-      h('button.btn.sm.ghost', { onclick: () => { d.photo_url = null; prev.style.backgroundImage = ''; prev.textContent = 'No photo'; } }, 'Remove')),
+      h('button.btn.sm.ghost', { onclick: () => {
+        if (d.photo_url && d.photo_url !== c?.photo_url) deleteFile(d.photo_url); // never saved, safe to delete now
+        d.photo_url = null; prev.style.backgroundImage = ''; prev.textContent = 'No photo';
+      } }, 'Remove')),
       h('small.muted', 'Portrait 4:5, e.g. 720 × 900 px. Keep the face near the top center.'))),
     h('div.grid-2',
       field('Name', nameIn),
@@ -516,14 +560,16 @@ async function editContestant(c, order = 0) {
         ? await sb.from('contestants').update(row).eq('id', c.id)
         : await sb.from('contestants').insert({ ...row, event_id: ev.id, sort_order: order });
       if (error) throw error;
-      if (c?.video_url && c.video_url !== row.video_url) deleteVideo(c.video_url); // replaced or removed
+      if (c?.video_url && c.video_url !== row.video_url) deleteFile(c.video_url); // replaced or removed
+      if (c?.photo_url && c.photo_url !== row.photo_url) deleteFile(c.photo_url);
       toast('Saved', 'success');
       renderTab();
       return true;
     } },
   ]);
-  // Closed without saving: discard a video uploaded in this dialog.
-  if (!saved && d.video_url && d.video_url !== c?.video_url) deleteVideo(d.video_url);
+  // Closed without saving: discard files uploaded in this dialog.
+  if (!saved && d.video_url && d.video_url !== c?.video_url) deleteFile(d.video_url);
+  if (!saved && d.photo_url && d.photo_url !== c?.photo_url) deleteFile(d.photo_url);
 }
 
 // ---------------------------------------------------------------------
@@ -918,7 +964,7 @@ async function tabVotes(main) {
           h('td', h('button.btn.sm.ghost.icon-only', { type: 'button', onclick: async () => {
             if (!(await confirmBox('Delete vote?', 'Remove this vote permanently?', 'Delete', true))) return;
             const { error } = await sb.from('votes').delete().eq('id', x.id);
-            if (error) toast(error.message, 'error'); else renderTab();
+            if (error) toast(error.message, 'error'); else { deleteProofs([x.proof_path]); renderTab(); }
           }, 'aria-label': 'Delete this vote' }, icon('trash-2', 16))))))) : h('div.card', h('p.muted', q ? 'No matches.' : 'No votes yet.')));
     } else {
       const list = attempts.filter((a) => match(a.name, a.ip, a.code));
@@ -943,7 +989,8 @@ async function tabVotes(main) {
       h('button.btn.sm.danger', { onclick: async () => {
         if (!(await confirmBox('Reset all votes?', `This deletes EVERY vote, voter and log for "${ev.title}". Contestants and settings are kept. This cannot be undone.`, 'Reset votes', true))) return;
         const { error } = await sb.rpc('reset_event_votes', { p_event_id: ev.id });
-        if (error) toast(error.message, 'error'); else { toast('All votes cleared', 'success'); renderTab(); }
+        if (error) toast(error.message, 'error');
+        else { deleteFolder('proofs', ev.id); toast('All votes cleared', 'success'); renderTab(); }
       } }, 'Reset votes')),
     h('div.stats',
       stat(String(approved), 'Counted votes'),
