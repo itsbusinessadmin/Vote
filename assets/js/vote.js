@@ -23,10 +23,11 @@ const bySortOrder = (a, b) => a.sort_order - b.sort_order || a.created_at.locale
 
 async function main() {
   if (!configured) return notConfigured(app);
-  const slug = new URLSearchParams(location.search).get('e');
-  if (!slug) return renderEventList();
-
-  if (!(await loadEvent(slug))) return;
+  // No ?e= in the link: open the main event (the one with a blank link
+  // name), or list the events if there isn't one.
+  const slug = new URLSearchParams(location.search).get('e') || '';
+  if (!slug && !(await loadEvent('', true))) return renderEventList();
+  if (slug && !(await loadEvent(slug))) return;
 
   // Show the page now; this device's votes fill in a moment later.
   render();
@@ -58,9 +59,10 @@ async function main() {
 
 // Event, contestants and criteria in a single request. Returns false (and
 // shows a message) when the event is missing or unpublished.
-async function loadEvent(slug) {
+async function loadEvent(slug, quiet = false) {
   const { data, error } = await sb.from('events').select('*, contestants(*), criteria(*)').eq('slug', slug).maybeSingle();
   if (error && event) return true; // network blip on a reload: keep showing what we have
+  if ((error || !data) && quiet && !event) return false;
   if (error || !data) {
     fill(app, h('div.center-card', h('h2', 'Event not found'), h('p.muted', 'Check the link you were given.')));
     event = null;
@@ -140,13 +142,13 @@ async function renderEventList() {
     .in('status', ['open', 'closed']).order('created_at', { ascending: false });
   const open = (data || []).filter((e) => e.status === 'open');
   if (open.length === 1) {
-    location.replace(`?e=${encodeURIComponent(open[0].slug)}`);
+    location.replace(open[0].slug ? `?e=${encodeURIComponent(open[0].slug)}` : location.pathname);
     return;
   }
   fill(app, h('div.wrap', { style: { maxWidth: '640px' } },
     h('h1', { style: { marginTop: '2rem' } }, 'Events'),
     !data?.length ? h('p.muted', 'No events are open for voting right now.') : null,
-    h('div.stack', (data || []).map((e) => h('a.card.row', { href: `?e=${encodeURIComponent(e.slug)}`, style: { textDecoration: 'none', color: 'inherit' } },
+    h('div.stack', (data || []).map((e) => h('a.card.row', { href: e.slug ? `?e=${encodeURIComponent(e.slug)}` : location.pathname, style: { textDecoration: 'none', color: 'inherit' } },
       e.logo_url ? h('img', { src: e.logo_url, alt: '', style: { width: '56px', height: '56px', objectFit: 'contain', borderRadius: '12px' } }) : null,
       h('div.grow', h('b', e.title), e.subtitle ? h('div.muted.small', e.subtitle) : null),
       h('span.badge', { class: e.status }, e.status === 'open' ? 'Voting open' : 'Closed'))))));

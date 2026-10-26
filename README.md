@@ -4,7 +4,7 @@ Two pages:
 
 | Page | Who | What it does |
 |---|---|---|
-| `index.html?e=<event>` | Audience | See the logo, rules and judging criteria, then vote. Works on phones. |
+| `index.html?e=<event>` (or just your site's address for the event whose link name is blank) | Audience | See the logo, rules and judging criteria, then vote. Works on phones. |
 | `admin.html` | You | Manage everything: branding, contestants, criteria, voting rules, anti-cheat, payments, voters and screenshots. |
 
 It costs **₱0 / $0** to run. Static files are hosted on GitHub Pages (or Netlify/Vercel/Cloudflare Pages), and

@@ -131,7 +131,9 @@ async function loadEvents() {
 async function saveEvent(patch, quiet = false) {
   const { data, error } = await sb.from('events').update(patch).eq('id', ev.id).select().single();
   if (error) {
-    toast(/events_slug_key|duplicate key/.test(error.message) ? 'That link name is already used by another event. Choose a different one.' : error.message, 'error');
+    toast(!/events_slug_key|duplicate key/.test(error.message) ? error.message
+      : patch.slug === '' ? 'Another event already uses the main link (blank link name). Give that event a link name first.'
+      : 'That link name is already used by another event. Choose a different one.', 'error');
     return false;
   }
   Object.assign(ev, data);
@@ -333,7 +335,7 @@ async function tabEvent(main) {
     const QR = m.default || m;
     const src = await QR.toDataURL(url, { width: 360, margin: 1 });
     qrBox.append(h('img', { src, alt: 'QR code', style: { width: '140px' } }),
-      h('a.btn.sm.block', { href: src, download: `${ev.slug}-qr.png`, style: { marginTop: '6px' } }, 'Download QR'));
+      h('a.btn.sm.block', { href: src, download: `${ev.slug || 'event'}-qr.png`, style: { marginTop: '6px' } }, 'Download QR'));
   }).catch(() => qrBox.remove());
 
   fill(main,
@@ -361,7 +363,8 @@ async function tabEvent(main) {
       field('Subtitle', input(d, 'subtitle', 'text', { placeholder: 'e.g. Grand Finals · Oct 20, 2026' })),
       field('Description / instructions', input(d, 'description', 'textarea', { placeholder: 'Shown to voters above the contestants.' })),
       h('div.grid-2',
-        field('Link name (URL slug)', input(d, 'slug'), 'Used in the voting link. Letters, numbers and dashes.'),
+        field('Link name (URL slug)', input(d, 'slug', 'text', { placeholder: 'Blank = main link' }),
+          `Leave blank to use your site's main link (${new URL('./', location.href).host}). Otherwise letters, numbers and dashes.`),
         field('Theme color', input(d, 'theme_color', 'color')))),
     h('div.card.section.stack',
       h('h2.card-title', 'Images'),
@@ -370,7 +373,8 @@ async function tabEvent(main) {
         imageUpload('Banner / background', 'banner_url', { wide: true, hint: 'Shown whole across the top of the voting page, never cropped. 1920 × 1080 px (16:9) looks biggest on phones; a wide 1920 × 640 px (3:1) banner also works.', maxSide: 1920 }))),
     h('div.row', { style: { marginTop: '1rem' } },
       h('button.btn.primary', { onclick: async () => {
-        d.slug = slugify(d.slug || d.title);
+        // Blank link name: this becomes the main event at the site's own address.
+        d.slug = String(d.slug || '').trim() ? slugify(d.slug) : '';
         if (!String(d.title || '').trim()) return toast('The event needs a title.', 'error');
         if (d.starts_at && d.ends_at && Date.parse(d.ends_at) <= Date.parse(d.starts_at)) {
           return toast('"Closes at" must be after "Opens at".', 'error');
@@ -1316,7 +1320,7 @@ function exportCsv(votes, voterById) {
       x.ip, v.device_info?.browser, v.device_info?.os, v.device_info?.model || v.device_info?.type, v.fingerprint,
       x.scores ? JSON.stringify(x.scores) : ''].map(q).join(',');
   });
-  downloadText(`${ev.slug}-votes.csv`, [cols.join(','), ...lines].join('\n'));
+  downloadText(`${ev.slug || 'event'}-votes.csv`, [cols.join(','), ...lines].join('\n'));
 }
 
 // ---------------------------------------------------------------------
@@ -1417,7 +1421,7 @@ async function tabScreenshot(main) {
         toast('Image copied to clipboard', 'success');
       } else {
         const url = await toPng(stage, o);
-        h('a', { href: url, download: `${ev.slug}-standings-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.png` }).click();
+        h('a', { href: url, download: `${ev.slug || 'event'}-standings-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.png` }).click();
         toast('Screenshot saved', 'success');
       }
     } catch (e) {

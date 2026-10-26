@@ -284,6 +284,9 @@ export function slugify(s) {
   return String(s).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'event';
 }
 
+// The event with a blank link name is the site's main event: it opens at
+// the site's own address (e.g. https://talentadongce.online/).
 export function voteUrl(slug) {
+  if (!slug) return new URL('./', location.href).href;
   return new URL(`index.html?e=${encodeURIComponent(slug)}`, location.href).href;
 }
