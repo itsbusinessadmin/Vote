@@ -28,7 +28,7 @@ the database, admin login and image storage run on the **Supabase free tier**. T
 - **Anti-cheat** (see below), plus a log of every blocked attempt.
 - **Live updates**: changes saved in the admin (title, banner, contestants, criteria, rules, opening/closing voting) appear on open voting pages within a second, with no reload. Uses Supabase Realtime; if its connection limit is reached (200 on the free plan), pages check for changes every 30 seconds instead.
 - **Payments**: view receipts, approve or reject individually, approve all, see totals.
-- **Votes & voters**: every voter with device, OS, model, IP and fingerprint. Shared-device, shared-IP, shared-name and incognito voters are flagged. Block or unblock voters, delete votes, export CSV, reset.
+- **Votes & voters**: every voter with device, OS, model, IP and fingerprint. Shared-fingerprint, shared-name and incognito voters are flagged. Block or unblock voters, delete votes, export CSV, reset.
 - **Screenshot tab**: a styled standings board (podium + list) that you capture as a PNG or copy to the clipboard. You can show names and photos, **numbers only**, or go **fully anonymous** (Contestant A, B, C…). It also has Top 3/5/10, a dark or light style, a custom title and footer note, and an admin-only detailed table with per-criterion averages.
 
 **Audience**
@@ -45,7 +45,6 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 |---|---|---|
 | Browser token (always on) | Same browser voting again | Saved in localStorage, a cookie and IndexedDB. Clearing one store restores it from the others. |
 | **Device fingerprint** (computers only) | Incognito/private windows or clearing data on a desktop or laptop | Hash of GPU, screen, CPU cores, fonts, canvas, audio, timezone and language, matched **on the same internet connection**. Not used for phones: every phone of one model (and iOS version) produces the same hash, so it would treat strangers as one voter. |
-| **Same computer, other browser** (computers only) | Switching Chrome → Edge → Firefox on one desktop or laptop | Matches the same OS, screen size, CPU cores and timezone **on the same internet connection** (exact IPv4 address or IPv6 /64). Identical PCs on one network (e.g. a school lab) can count as one voter, so turn this off for lab-based voting. |
 | Same email / mobile | One person, many devices | |
 | Same name | Lazy duplicates | Normalized, e.g. "Juan Dela Cruz" = "juan delacruz". |
 | Block private windows | Incognito, which wipes the browser token | Off by default. A best guess, mainly in Chrome. |
@@ -58,7 +57,7 @@ Honest limits: no free web app can make cheating *impossible*. Someone with seve
 Phones are recognised by their browser only, because **identical phone models** (e.g. the same iPhone and iOS) produce
 identical fingerprints: a phone in a private window can vote again (turn on "Block private / incognito windows" to stop that).
 Privacy browsers such as Brave or Safari private mode also randomize some signals. That's why the admin
-**Votes & voters** tab flags shared fingerprints, IPs and names, so you can review and block. For high-stakes votes,
+**Votes & voters** tab flags shared fingerprints and names, so you can review and block. For high-stakes votes,
 turn on email or mobile, or use paid votes with receipt approval.
 
 ---

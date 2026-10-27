@@ -638,7 +638,7 @@ async function editCriterion(c, order = 0) {
 const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'currency', 'payment_instructions',
   'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
   'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label',
-  'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_contact', 'limit_by_name', 'block_bots',
+  'limit_by_fingerprint', 'limit_by_contact', 'limit_by_name', 'block_bots',
   'block_private', 'desktop_only',
   'cooldown_seconds', 'show_live_results', 'show_vote_counts',
   'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button', 'credits_require_receipt'];
@@ -772,8 +772,6 @@ async function tabRules(main, draft, openId) {
       h('h3.group-title', 'Recommended'),
       check(d, 'limit_by_fingerprint', 'Same computer, even in incognito',
         'Recognises a desktop or laptop after clearing data or in a private window, on the same internet connection. Not used for phones: phones of the same model look identical. Turn off for computer labs with identical PCs.'),
-      check(d, 'limit_by_cross_browser', 'Same computer, different browser',
-        'Blocks switching Chrome → Edge → Firefox on one desktop or laptop, on the same internet connection. Turn off for computer labs with identical PCs.'),
       check(d, 'block_bots', 'Block automated browsers'),
       field('Wait between votes (seconds)', input(d, 'cooldown_seconds', 'number', { min: 0 }), 'Slows down spam clicking. 0 = no wait.'),
       h('h3.group-title', 'Stricter (can block real people)'),
@@ -807,7 +805,7 @@ async function tabRules(main, draft, openId) {
     details: () => [d.require_name && 'Name', d.ask_email && 'Email', d.ask_phone && 'Mobile', String(d.extra_field_label || '').trim()]
       .filter(Boolean).join(' · ') || 'Nothing asked',
     anticheat: () => {
-      const on = ['limit_by_fingerprint', 'limit_by_cross_browser', 'block_bots', 'limit_by_contact', 'limit_by_name',
+      const on = ['limit_by_fingerprint', 'block_bots', 'limit_by_contact', 'limit_by_name',
         'desktop_only', 'block_private'].filter((k) => d[k]).length;
       return `${plural(on, 'check')} on${Number(d.cooldown_seconds) > 0 ? ` · ${d.cooldown_seconds}s between votes` : ''}`;
     },
@@ -1140,18 +1138,10 @@ async function tabVotes(main) {
   // Fingerprints only tell computers apart: phones of one model share them.
   const isComputer = (v) => v.device_info?.type === 'Desktop / Laptop';
   const fpCount = countBy(voters.filter(isComputer), 'fingerprint');
-  const ipCount = countBy(voters, 'ip');
   const nameCount = countBy(voters, 'name_norm');
-  // Same "computer" id on the same network block (IPv4 /24, IPv6 /64), like the server checks.
-  // Same "computer" id on the same connection (exact IPv4, IPv6 /64), like the server checks.
-  const ipConn = (ip) => (ip || '').includes(':') ? ip.split(':').slice(0, 4).join(':') : (ip || '');
-  const crossKey = (v) => isComputer(v) && v.cross_id && `${v.cross_id}|${ipConn(v.ip)}`;
-  const crossCount = countBy(voters.map((v) => ({ k: crossKey(v) })), 'k');
 
   const flags = (v) => [
     isComputer(v) && fpCount[v.fingerprint] > 1 && `${fpCount[v.fingerprint]} voters share this device fingerprint`,
-    crossKey(v) && crossCount[crossKey(v)] > 1 && `${crossCount[crossKey(v)]} voters look like the same device (different browsers)`,
-    v.ip && ipCount[v.ip] > 1 && `${ipCount[v.ip]} voters share this IP`,
     v.name_norm && nameCount[v.name_norm] > 1 && `${nameCount[v.name_norm]} voters share this name`,
     v.device_info?.private_mode_guess && 'Probably a private/incognito window',
   ].filter(Boolean);
