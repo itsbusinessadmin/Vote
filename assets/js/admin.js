@@ -638,7 +638,7 @@ async function editCriterion(c, order = 0) {
 const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'currency', 'payment_instructions',
   'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
   'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label',
-  'limit_by_fingerprint', 'limit_by_contact', 'limit_by_name', 'block_bots',
+  'limit_by_contact', 'limit_by_name', 'block_bots',
   'block_private', 'desktop_only',
   'cooldown_seconds', 'show_live_results', 'show_vote_counts',
   'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button', 'credits_require_receipt'];
@@ -770,8 +770,6 @@ async function tabRules(main, draft, openId) {
 
     section('anticheat', 5, 'Anti-cheat', 'The same browser always counts as the same voter. These add more checks.',
       h('h3.group-title', 'Recommended'),
-      check(d, 'limit_by_fingerprint', 'Same computer, even in incognito',
-        'Recognises a desktop or laptop after clearing data or in a private window, on the same internet connection. Not used for phones: phones of the same model look identical. Turn off for computer labs with identical PCs.'),
       check(d, 'block_bots', 'Block automated browsers'),
       field('Wait between votes (seconds)', input(d, 'cooldown_seconds', 'number', { min: 0 }), 'Slows down spam clicking. 0 = no wait.'),
       h('h3.group-title', 'Stricter (can block real people)'),
@@ -805,7 +803,7 @@ async function tabRules(main, draft, openId) {
     details: () => [d.require_name && 'Name', d.ask_email && 'Email', d.ask_phone && 'Mobile', String(d.extra_field_label || '').trim()]
       .filter(Boolean).join(' · ') || 'Nothing asked',
     anticheat: () => {
-      const on = ['limit_by_fingerprint', 'block_bots', 'limit_by_contact', 'limit_by_name',
+      const on = ['block_bots', 'limit_by_contact', 'limit_by_name',
         'desktop_only', 'block_private'].filter((k) => d[k]).length;
       return `${plural(on, 'check')} on${Number(d.cooldown_seconds) > 0 ? ` · ${d.cooldown_seconds}s between votes` : ''}`;
     },
@@ -1135,13 +1133,9 @@ async function tabVotes(main) {
   };
   const view = localStorage.getItem('votes_view') || 'voters';
   const voterById = Object.fromEntries(voters.map((v) => [v.id, v]));
-  // Fingerprints only tell computers apart: phones of one model share them.
-  const isComputer = (v) => v.device_info?.type === 'Desktop / Laptop';
-  const fpCount = countBy(voters.filter(isComputer), 'fingerprint');
   const nameCount = countBy(voters, 'name_norm');
 
   const flags = (v) => [
-    isComputer(v) && fpCount[v.fingerprint] > 1 && `${fpCount[v.fingerprint]} voters share this device fingerprint`,
     v.name_norm && nameCount[v.name_norm] > 1 && `${nameCount[v.name_norm]} voters share this name`,
     v.device_info?.private_mode_guess && 'Probably a private/incognito window',
   ].filter(Boolean);
@@ -1225,7 +1219,7 @@ async function tabVotes(main) {
     h('div.stats',
       stat(String(approved), 'Counted votes'),
       stat(String(voters.length), 'Voters'),
-      stat(String(new Set(voters.map((v) => v.fingerprint)).size), 'Unique devices'),
+      stat(String(new Set(voters.map((v) => v.device_token)).size), 'Unique browsers'),
       stat(String(new Set(voters.map((v) => v.ip).filter(Boolean)).size), 'Unique IPs'),
       stat(String(attempts.length), 'Blocked attempts'),
       ev.pricing === 'free_paid' ? stat(String(votes.filter((x) => x.from_credits).length), 'Votes cast with bought credits') : null),
