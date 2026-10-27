@@ -770,10 +770,10 @@ async function tabRules(main, draft, openId) {
 
     section('anticheat', 5, 'Anti-cheat', 'The same browser always counts as the same voter. These add more checks.',
       h('h3.group-title', 'Recommended'),
-      check(d, 'limit_by_fingerprint', 'Same device, even in incognito',
-        'Recognises a phone or PC after clearing data or in a private window. Identical phone models can occasionally look alike.'),
+      check(d, 'limit_by_fingerprint', 'Same computer, even in incognito',
+        'Recognises a desktop or laptop after clearing data or in a private window, on the same internet connection. Not used for phones: phones of the same model look identical. Turn off for computer labs with identical PCs.'),
       check(d, 'limit_by_cross_browser', 'Same computer, different browser',
-        'Blocks switching Chrome → Edge → Firefox on one device. Turn off for school computer labs with identical PCs.'),
+        'Blocks switching Chrome → Edge → Firefox on one desktop or laptop, on the same internet connection. Turn off for computer labs with identical PCs.'),
       check(d, 'block_bots', 'Block automated browsers'),
       field('Wait between votes (seconds)', input(d, 'cooldown_seconds', 'number', { min: 0 }), 'Slows down spam clicking. 0 = no wait.'),
       h('h3.group-title', 'Stricter (can block real people)'),
@@ -1141,17 +1141,20 @@ async function tabVotes(main) {
   };
   const view = localStorage.getItem('votes_view') || 'voters';
   const voterById = Object.fromEntries(voters.map((v) => [v.id, v]));
-  const fpCount = countBy(voters, 'fingerprint');
+  // Fingerprints only tell computers apart: phones of one model share them.
+  const isComputer = (v) => v.device_info?.type === 'Desktop / Laptop';
+  const fpCount = countBy(voters.filter(isComputer), 'fingerprint');
   const ipCount = countBy(voters, 'ip');
   const nameCount = countBy(voters, 'name_norm');
   // Same "computer" id on the same network block (IPv4 /24, IPv6 /64), like the server checks.
-  const ipNet = (ip) => (ip || '').includes(':') ? ip.split(':').slice(0, 4).join(':') : (ip || '').split('.').slice(0, 3).join('.');
-  const crossKey = (v) => v.cross_id && `${v.cross_id}|${ipNet(v.ip)}`;
+  // Same "computer" id on the same connection (exact IPv4, IPv6 /64), like the server checks.
+  const ipConn = (ip) => (ip || '').includes(':') ? ip.split(':').slice(0, 4).join(':') : (ip || '');
+  const crossKey = (v) => isComputer(v) && v.cross_id && `${v.cross_id}|${ipConn(v.ip)}`;
   const crossCount = countBy(voters.map((v) => ({ k: crossKey(v) })), 'k');
 
   const flags = (v) => [
-    fpCount[v.fingerprint] > 1 && `${fpCount[v.fingerprint]} voters share this device fingerprint`,
-    v.cross_id && crossCount[crossKey(v)] > 1 && `${crossCount[crossKey(v)]} voters look like the same device (different browsers)`,
+    isComputer(v) && fpCount[v.fingerprint] > 1 && `${fpCount[v.fingerprint]} voters share this device fingerprint`,
+    crossKey(v) && crossCount[crossKey(v)] > 1 && `${crossCount[crossKey(v)]} voters look like the same device (different browsers)`,
     v.ip && ipCount[v.ip] > 1 && `${ipCount[v.ip]} voters share this IP`,
     v.name_norm && nameCount[v.name_norm] > 1 && `${nameCount[v.name_norm]} voters share this name`,
     v.device_info?.private_mode_guess && 'Probably a private/incognito window',
