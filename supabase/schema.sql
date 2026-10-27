@@ -306,10 +306,7 @@ returns text language sql immutable as $$
   select right(regexp_replace(coalesce(t, ''), '[^0-9]+', '', 'g'), 10);
 $$;
 
--- The household/office network an address belongs to. IPv6 devices rotate
--- their last 64 bits for privacy, so compare the /64 prefix only. Mobile data
--- (carrier-grade NAT) can give each new connection a different IPv4 address
--- from the same block, so IPv4 compares the /24 (a.b.c.*).
+-- The household/office network an address belongs to: IPv6 /64, IPv4 /24.
 create or replace function public._ip_net(ip text)
 returns text language sql immutable as $$
   select case when coalesce(ip, '') like '%:%'
@@ -317,7 +314,9 @@ returns text language sql immutable as $$
               else array_to_string((string_to_array(coalesce(ip, ''), '.'))[1:3], '.') end;
 $$;
 
--- One internet connection: the exact IPv4 address, or the IPv6 /64.
+-- One internet connection: the exact IPv4 address, or the IPv6 /64 (devices
+-- rotate the last 64 bits for privacy). Not the IPv4 /24: on mobile data
+-- thousands of subscribers share one block.
 create or replace function public._ip_conn(ip text)
 returns text language sql immutable as $$
   select case when coalesce(ip, '') like '%:%' then public._ip_net(ip) else coalesce(ip, '') end;
@@ -334,11 +333,16 @@ returns uuid[] language sql stable security definer set search_path = public as 
     -- same browser is always the same voter
     select id from public.voters where p_tok <> '' and event_id = e.id and device_token = p_tok
     union all
-    select id from public.voters where e.limit_by_fingerprint and p_fp <> '' and event_id = e.id and fingerprint = p_fp
+    -- Fingerprint and "same computer" checks: computers only, on the same
+    -- internet connection. Phones of one model (and iOS version) produce
+    -- identical traits, so on phones these would lump strangers together;
+    -- phones are recognised by their browser token instead.
+    select id from public.voters where e.limit_by_fingerprint and p_fp <> '' and p_ip <> '' and event_id = e.id and fingerprint = p_fp
+      and device_info ->> 'type' = 'Desktop / Laptop' and public._ip_conn(ip) = public._ip_conn(p_ip)
     union all
-    -- same computer, different browser: identical hardware traits on the same network
-    select id from public.voters where e.limit_by_cross_browser and p_cross <> '' and p_ip <> ''
-      and event_id = e.id and cross_id = p_cross and public._ip_net(ip) = public._ip_net(p_ip)
+    -- same computer, different browser
+    select id from public.voters where e.limit_by_cross_browser and p_cross <> '' and p_ip <> '' and event_id = e.id and cross_id = p_cross
+      and device_info ->> 'type' = 'Desktop / Laptop' and public._ip_conn(ip) = public._ip_conn(p_ip)
     union all
     select id from public.voters where e.limit_by_ip and p_ip <> '' and event_id = e.id and ip = p_ip
     union all

@@ -44,8 +44,8 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 | Check | Catches | Notes |
 |---|---|---|
 | Browser token (always on) | Same browser voting again | Saved in localStorage, a cookie and IndexedDB. Clearing one store restores it from the others. |
-| **Device fingerprint** | Incognito/private windows, clearing data, a second browser on the same device | Hash of GPU, screen, CPU cores, fonts, canvas, audio, timezone and language. |
-| **Same computer, other browser** | Switching Chrome → Edge → Firefox (or an in-app browser like Messenger) on one PC or phone | Matches the same OS, screen size, CPU cores and timezone **on the same network** (same IPv4 /24 or IPv6 /64, so mobile data that hops between addresses still matches). Identical PCs on one network (e.g. a school lab) can count as one voter, so turn this off for lab-based voting. |
+| **Device fingerprint** (computers only) | Incognito/private windows or clearing data on a desktop or laptop | Hash of GPU, screen, CPU cores, fonts, canvas, audio, timezone and language, matched **on the same internet connection**. Not used for phones: every phone of one model (and iOS version) produces the same hash, so it would treat strangers as one voter. |
+| **Same computer, other browser** (computers only) | Switching Chrome → Edge → Firefox on one desktop or laptop | Matches the same OS, screen size, CPU cores and timezone **on the same internet connection** (exact IPv4 address or IPv6 /64). Identical PCs on one network (e.g. a school lab) can count as one voter, so turn this off for lab-based voting. |
 | Same email / mobile | One person, many devices | |
 | Same name | Lazy duplicates | Normalized, e.g. "Juan Dela Cruz" = "juan delacruz". |
 | Same IP | Online-only events | **Don't use at a venue**: everyone on the same Wi-Fi shares one IP. |
@@ -57,8 +57,9 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 | Admin block | Anyone you flag | |
 
 Honest limits: no free web app can make cheating *impossible*. Someone with several phones can vote from each phone.
-The fingerprint also has trade-offs: two **identical phone models** (e.g. the same iPhone and iOS) can look alike,
-and privacy browsers such as Brave or Safari private mode randomize some signals. That's why the admin
+Phones are recognised by their browser only, because **identical phone models** (e.g. the same iPhone and iOS) produce
+identical fingerprints: a phone in a private window can vote again (turn on "Block private / incognito windows" to stop that).
+Privacy browsers such as Brave or Safari private mode also randomize some signals. That's why the admin
 **Votes & voters** tab flags shared fingerprints, IPs and names, so you can review and block. For high-stakes votes,
 turn on email or mobile, or use paid votes with receipt approval.
 
