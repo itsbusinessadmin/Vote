@@ -72,7 +72,7 @@ create table if not exists public.events (
 
   -- anti-cheat
   limit_by_fingerprint      boolean not null default true,
-  limit_by_cross_browser    boolean not null default true,
+  limit_by_cross_browser    boolean not null default false,  -- no longer used
   limit_by_ip               boolean not null default false,
   limit_by_name             boolean not null default false,
   limit_by_contact          boolean not null default true,
@@ -147,10 +147,12 @@ alter table public.events add column if not exists email_domains text;
 alter table public.events add column if not exists block_private boolean not null default false;
 alter table public.events add column if not exists desktop_only boolean not null default false;
 alter table public.events add column if not exists max_voters_per_network int not null default 0 check (max_voters_per_network >= 0);
--- The "same internet connection" and "max voters per connection" rules were
--- removed: people sharing a Wi-Fi or mobile network were blocked as one voter.
+-- The "same internet connection", "max voters per connection" and "same
+-- computer, different browser" rules were removed: people sharing a Wi-Fi or
+-- mobile network (or identical laptops on one) were blocked as one voter.
 -- The columns stay so older pages keep working; keep them switched off.
-update public.events set limit_by_ip = false, max_voters_per_network = 0 where limit_by_ip or max_voters_per_network <> 0;
+update public.events set limit_by_ip = false, max_voters_per_network = 0, limit_by_cross_browser = false
+ where limit_by_ip or max_voters_per_network <> 0 or limit_by_cross_browser;
 -- 'free_paid': votes are free, and voters who used every vote can buy more.
 alter table public.events drop constraint if exists events_pricing_check;
 alter table public.events add constraint events_pricing_check check (pricing in ('free', 'paid', 'free_paid'));
@@ -337,15 +339,13 @@ returns uuid[] language sql stable security definer set search_path = public as 
     -- same browser is always the same voter
     select id from public.voters where p_tok <> '' and event_id = e.id and device_token = p_tok
     union all
-    -- Fingerprint and "same computer" checks: computers only, on the same
-    -- internet connection. Phones of one model (and iOS version) produce
-    -- identical traits, so on phones these would lump strangers together;
-    -- phones are recognised by their browser token instead.
+    -- Fingerprint: computers only, and only on the same internet connection,
+    -- so it never groups different machines. Phones of one model (and iOS
+    -- version) produce identical fingerprints, so phones are recognised by
+    -- their browser token instead. (The old "same computer, different
+    -- browser" check was removed: identical office or school laptops on one
+    -- connection looked like one computer.)
     select id from public.voters where e.limit_by_fingerprint and p_fp <> '' and p_ip <> '' and event_id = e.id and fingerprint = p_fp
-      and device_info ->> 'type' = 'Desktop / Laptop' and public._ip_conn(ip) = public._ip_conn(p_ip)
-    union all
-    -- same computer, different browser
-    select id from public.voters where e.limit_by_cross_browser and p_cross <> '' and p_ip <> '' and event_id = e.id and cross_id = p_cross
       and device_info ->> 'type' = 'Desktop / Laptop' and public._ip_conn(ip) = public._ip_conn(p_ip)
     union all
     select id from public.voters where e.limit_by_name and p_name_norm <> '' and event_id = e.id and name_norm = p_name_norm
