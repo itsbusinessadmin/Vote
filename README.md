@@ -48,8 +48,6 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 | **Same computer, other browser** (computers only) | Switching Chrome → Edge → Firefox on one desktop or laptop | Matches the same OS, screen size, CPU cores and timezone **on the same internet connection** (exact IPv4 address or IPv6 /64). Identical PCs on one network (e.g. a school lab) can count as one voter, so turn this off for lab-based voting. |
 | Same email / mobile | One person, many devices | |
 | Same name | Lazy duplicates | Normalized, e.g. "Juan Dela Cruz" = "juan delacruz". |
-| Same IP | Online-only events | **Don't use at a venue**: everyone on the same Wi-Fi shares one IP. |
-| Max voters per connection | One household or vote farm creating many voters | Online-only, for the same reason. 0 = off. |
 | Block private windows | Incognito, which wipes the browser token | Off by default. A best guess, mainly in Chrome. |
 | Desktop / laptop only | Voting from several phones | Off by default. Phones and tablets (including iPads) see a "Voting unavailable on this device" anti-cheat screen, and the database rejects their votes. |
 | Bot blocking | Automated / headless browsers | |

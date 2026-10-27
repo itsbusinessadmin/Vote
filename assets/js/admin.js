@@ -638,8 +638,8 @@ async function editCriterion(c, order = 0) {
 const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'currency', 'payment_instructions',
   'require_payment_proof', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter',
   'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label',
-  'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_contact', 'limit_by_name', 'limit_by_ip', 'block_bots',
-  'block_private', 'max_voters_per_network', 'desktop_only',
+  'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_contact', 'limit_by_name', 'block_bots',
+  'block_private', 'desktop_only',
   'cooldown_seconds', 'show_live_results', 'show_vote_counts',
   'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button', 'credits_require_receipt'];
 
@@ -780,10 +780,6 @@ async function tabRules(main, draft, openId) {
       when(() => d.ask_email || d.ask_phone,
         check(d, 'limit_by_contact', 'Same email or mobile number', 'One email / number = one voter.')),
       check(d, 'limit_by_name', 'Same name', '"Juan Dela Cruz" = "juan delacruz". Two people can share a name.'),
-      check(d, 'limit_by_ip', 'Same internet connection (IP)',
-        'Everyone on one Wi-Fi shares an IP. Only for online voting, never at a live venue.'),
-      field('Max voters per internet connection', input(d, 'max_voters_per_network', 'number', { min: 0 }),
-        'Stops one household or vote farm from making many "voters" on one Wi-Fi. For online voting only; at a venue everyone shares the Wi-Fi. 0 = no limit.'),
       check(d, 'desktop_only', 'Desktop and laptop computers only',
         'Phones and tablets see "Voting unavailable on this device" (worded as anti-cheat) and cannot vote. Most people carry only one phone but rarely bring several laptops, so this limits repeat voting. Leave off for a live audience voting on their phones.'),
       check(d, 'block_private', 'Block private / incognito windows',
@@ -811,8 +807,8 @@ async function tabRules(main, draft, openId) {
     details: () => [d.require_name && 'Name', d.ask_email && 'Email', d.ask_phone && 'Mobile', String(d.extra_field_label || '').trim()]
       .filter(Boolean).join(' · ') || 'Nothing asked',
     anticheat: () => {
-      const on = ['limit_by_fingerprint', 'limit_by_cross_browser', 'block_bots', 'limit_by_contact', 'limit_by_name', 'limit_by_ip',
-        'desktop_only', 'block_private'].filter((k) => d[k]).length + (Number(d.max_voters_per_network) > 0 ? 1 : 0);
+      const on = ['limit_by_fingerprint', 'limit_by_cross_browser', 'block_bots', 'limit_by_contact', 'limit_by_name',
+        'desktop_only', 'block_private'].filter((k) => d[k]).length;
       return `${plural(on, 'check')} on${Number(d.cooldown_seconds) > 0 ? ` · ${d.cooldown_seconds}s between votes` : ''}`;
     },
     display: () => (!d.show_live_results ? 'Standings hidden from voters' : d.show_vote_counts ? 'Live standings with vote counts' : 'Live standings, no counts'),
@@ -857,7 +853,7 @@ async function tabRules(main, draft, openId) {
       return;
     }
     const patch = Object.fromEntries(RULE_KEYS.map((k) => [k, d[k]]));
-    for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds', 'max_voters_per_network']) {
+    for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds']) {
       patch[k] = Math.max(0, Number(patch[k]) || 0);
     }
     patch.score_max = Math.min(100, Math.max(2, patch.score_max));

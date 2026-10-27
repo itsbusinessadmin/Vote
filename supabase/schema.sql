@@ -147,6 +147,10 @@ alter table public.events add column if not exists email_domains text;
 alter table public.events add column if not exists block_private boolean not null default false;
 alter table public.events add column if not exists desktop_only boolean not null default false;
 alter table public.events add column if not exists max_voters_per_network int not null default 0 check (max_voters_per_network >= 0);
+-- The "same internet connection" and "max voters per connection" rules were
+-- removed: people sharing a Wi-Fi or mobile network were blocked as one voter.
+-- The columns stay so older pages keep working; keep them switched off.
+update public.events set limit_by_ip = false, max_voters_per_network = 0 where limit_by_ip or max_voters_per_network <> 0;
 -- 'free_paid': votes are free, and voters who used every vote can buy more.
 alter table public.events drop constraint if exists events_pricing_check;
 alter table public.events add constraint events_pricing_check check (pricing in ('free', 'paid', 'free_paid'));
@@ -344,8 +348,6 @@ returns uuid[] language sql stable security definer set search_path = public as 
     select id from public.voters where e.limit_by_cross_browser and p_cross <> '' and p_ip <> '' and event_id = e.id and cross_id = p_cross
       and device_info ->> 'type' = 'Desktop / Laptop' and public._ip_conn(ip) = public._ip_conn(p_ip)
     union all
-    select id from public.voters where e.limit_by_ip and p_ip <> '' and event_id = e.id and ip = p_ip
-    union all
     select id from public.voters where e.limit_by_name and p_name_norm <> '' and event_id = e.id and name_norm = p_name_norm
     union all
     select id from public.voters where e.limit_by_contact and p_email <> '' and event_id = e.id and email = p_email
@@ -499,11 +501,7 @@ begin
       v_limit := e.max_votes_per_voter + v_credits;
       v_on_credit := e.pricing = 'free_paid' and e.max_votes_per_voter > 0 and v_used >= e.max_votes_per_voter;
 
-      if cardinality(v_ids) = 0 and e.max_voters_per_network > 0 and v_ip <> '' and (
-            select count(*) from public.voters
-             where event_id = e.id and public._ip_conn(ip) = public._ip_conn(v_ip)) >= e.max_voters_per_network then
-        v_code := 'NETWORK_LIMIT'; v_msg := 'Too many people have already voted from this internet connection.';
-      elsif v_qty > 1 and not v_on_credit then
+      if v_qty > 1 and not v_on_credit then
         v_code := 'BAD_QUANTITY'; v_msg := 'Free votes are cast one at a time.';
       elsif e.cooldown_seconds > 0 and v_last is not null and now() - v_last < make_interval(secs => e.cooldown_seconds) then
         v_code := 'TOO_FAST'; v_msg := 'Please wait a few seconds before voting again.';
