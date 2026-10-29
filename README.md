@@ -28,7 +28,7 @@ the database, admin login and image storage run on the **Supabase free tier**. T
 - **Anti-cheat** (see below), plus a log of every blocked attempt.
 - **Live updates**: changes saved in the admin (title, banner, contestants, criteria, rules, opening/closing voting) appear on open voting pages within a second, with no reload. Uses Supabase Realtime; if its connection limit is reached (200 on the free plan), pages check for changes every 30 seconds instead.
 - **Payments**: view receipts, approve or reject individually, approve all, see totals.
-- **Votes & voters**: every voter with device, OS, model, IP and fingerprint. Shared-name and incognito voters are flagged. Block or unblock voters, delete votes, export CSV, reset.
+- **Votes & voters**: every voter with device, OS, model, IP and fingerprint. Shared-name and incognito voters are flagged, plus shared fingerprints and IPs for the device/network checks you turned on. Block or unblock voters, delete votes, export CSV, reset.
 - **Screenshot tab**: a styled standings board (podium + list) that you capture as a PNG or copy to the clipboard. You can show names and photos, **numbers only**, or go **fully anonymous** (Contestant A, B, C…). It also has Top 3/5/10, a dark or light style, a custom title and footer note, and an admin-only detailed table with per-criterion averages.
 
 **Audience**
@@ -44,6 +44,10 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 | Check | Catches | Notes |
 |---|---|---|
 | Browser token (always on) | Same browser voting again | Saved in localStorage, a cookie and IndexedDB. Clearing one store restores it from the others. |
+| Device fingerprint *(opt-in, off by default)* | Incognito/private windows, clearing data, a second browser on the same device | Hash of GPU, screen, CPU cores, fonts, canvas, audio, timezone and language. **Phones of the same model and identical laptops can look like one device**, so only turn on when that is not a risk. |
+| Same computer, other browser *(opt-in)* | Switching Chrome → Edge → Firefox on one PC or phone | Same OS, screen size, CPU cores and timezone **on the same network**. Identical PCs on one network (a school lab, an office) count as one voter. |
+| Same IP *(opt-in)* | Online-only events | **Don't use at a venue**: everyone on the same Wi-Fi, and many people on mobile data, share one address. |
+| Max voters per connection *(opt-in)* | One household or vote farm creating many voters | Online-only, for the same reason. 0 = off. |
 | Same email / mobile | One person, many devices | |
 | Same name | Lazy duplicates | Normalized, e.g. "Juan Dela Cruz" = "juan delacruz". |
 | Block private windows | Incognito, which wipes the browser token | Off by default. A best guess, mainly in Chrome. |
@@ -53,10 +57,12 @@ Every vote is checked against previous votes, and a voter counts as "the same pe
 | Admin block | Anyone you flag | |
 
 Honest limits: no free web app can make cheating *impossible*. Someone with several phones can vote from each phone.
-Voters are recognised by their browser only. Device fingerprints and internet addresses are not used: identical
-phones, and identical office or school laptops on one Wi-Fi, look the same, so those checks blocked real people.
-That means a private window or a second browser can vote again (turn on "Block private / incognito windows" to stop
-the first). The admin **Votes & voters** tab flags shared names and private windows, so you can review and block. For high-stakes votes,
+By default voters are recognised by their browser only. The device and network checks above are off unless you tick
+them in **Voting rules → Anti-cheat**, because identical phones and identical office or school laptops on one Wi-Fi look
+the same and can be blocked as one voter. Changes apply to open voting pages as soon as you save. With them off, a
+private window or a second browser can vote again (turn on "Block private / incognito windows" to stop the first).
+The admin **Votes & voters** tab flags shared names, private windows and, for checks you turned on, shared
+fingerprints and IPs, so you can review and block. For high-stakes votes,
 turn on email or mobile, or use paid votes with receipt approval.
 
 ---

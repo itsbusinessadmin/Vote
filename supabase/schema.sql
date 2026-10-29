@@ -71,8 +71,8 @@ create table if not exists public.events (
   extra_field_label         text,
 
   -- anti-cheat
-  limit_by_fingerprint      boolean not null default false,  -- no longer used
-  limit_by_cross_browser    boolean not null default false,  -- no longer used
+  limit_by_fingerprint      boolean not null default false,  -- opt-in: can match identical phones
+  limit_by_cross_browser    boolean not null default false,  -- opt-in: can match identical PCs on one network
   limit_by_ip               boolean not null default false,
   limit_by_name             boolean not null default false,
   limit_by_contact          boolean not null default true,
@@ -148,12 +148,12 @@ alter table public.events add column if not exists block_private boolean not nul
 alter table public.events add column if not exists desktop_only boolean not null default false;
 alter table public.events add column if not exists max_voters_per_network int not null default 0 check (max_voters_per_network >= 0);
 -- The "same internet connection", "max voters per connection", "same
--- computer, different browser" and device-fingerprint rules were removed:
--- people sharing a Wi-Fi or mobile network, identical laptops and phones of
--- the same model were blocked as one voter.
--- The columns stay so older pages keep working; keep them switched off.
-update public.events set limit_by_ip = false, max_voters_per_network = 0, limit_by_cross_browser = false, limit_by_fingerprint = false
- where limit_by_ip or max_voters_per_network <> 0 or limit_by_cross_browser or limit_by_fingerprint;
+-- computer, different browser" and device-fingerprint checks are opt-in and
+-- off by default: people sharing a Wi-Fi or mobile network, identical laptops
+-- and phones of the same model can be counted as one voter. The admin turns
+-- each one on per event; this file never changes those settings.
+alter table public.events alter column limit_by_fingerprint set default false;
+alter table public.events alter column limit_by_cross_browser set default false;
 -- 'free_paid': votes are free, and voters who used every vote can buy more.
 alter table public.events drop constraint if exists events_pricing_check;
 alter table public.events add constraint events_pricing_check check (pricing in ('free', 'paid', 'free_paid'));
@@ -340,9 +340,16 @@ returns uuid[] language sql stable security definer set search_path = public as 
     -- same browser is always the same voter
     select id from public.voters where p_tok <> '' and event_id = e.id and device_token = p_tok
     union all
-    -- No device-fingerprint or network matching: identical phones and
-    -- identical office/school laptops share fingerprints and connections, so
-    -- those checks treated different people as one voter.
+    -- Opt-in checks (off by default; they can match different people:
+    -- identical phones share fingerprints, a Wi-Fi shares one connection).
+    select id from public.voters where e.limit_by_fingerprint and p_fp <> '' and event_id = e.id and fingerprint = p_fp
+    union all
+    -- same computer, different browser: identical hardware traits on the same network
+    select id from public.voters where e.limit_by_cross_browser and p_cross <> '' and p_ip <> ''
+      and event_id = e.id and cross_id = p_cross and public._ip_net(ip) = public._ip_net(p_ip)
+    union all
+    select id from public.voters where e.limit_by_ip and p_ip <> '' and event_id = e.id and ip = p_ip
+    union all
     select id from public.voters where e.limit_by_name and p_name_norm <> '' and event_id = e.id and name_norm = p_name_norm
     union all
     select id from public.voters where e.limit_by_contact and p_email <> '' and event_id = e.id and email = p_email
@@ -496,7 +503,11 @@ begin
       v_limit := e.max_votes_per_voter + v_credits;
       v_on_credit := e.pricing = 'free_paid' and e.max_votes_per_voter > 0 and v_used >= e.max_votes_per_voter;
 
-      if v_qty > 1 and not v_on_credit then
+      if cardinality(v_ids) = 0 and e.max_voters_per_network > 0 and v_ip <> '' and (
+            select count(*) from public.voters
+             where event_id = e.id and public._ip_conn(ip) = public._ip_conn(v_ip)) >= e.max_voters_per_network then
+        v_code := 'NETWORK_LIMIT'; v_msg := 'Too many people have already voted from this internet connection.';
+      elsif v_qty > 1 and not v_on_credit then
         v_code := 'BAD_QUANTITY'; v_msg := 'Free votes are cast one at a time.';
       elsif e.cooldown_seconds > 0 and v_last is not null and now() - v_last < make_interval(secs => e.cooldown_seconds) then
         v_code := 'TOO_FAST'; v_msg := 'Please wait a few seconds before voting again.';

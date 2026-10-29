@@ -640,6 +640,7 @@ const RULE_KEYS = ['voting_mode', 'score_max', 'pricing', 'price_per_vote', 'cur
   'allow_repeat_contestant', 'require_name', 'ask_email', 'email_domains', 'ask_phone', 'extra_field_label',
   'limit_by_contact', 'limit_by_name', 'block_bots',
   'block_private', 'desktop_only',
+  'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_ip', 'max_voters_per_network',
   'cooldown_seconds', 'show_live_results', 'show_vote_counts',
   'credits_enabled', 'credits_price', 'credits_title', 'credits_message', 'credits_button', 'credits_require_receipt'];
 
@@ -778,6 +779,17 @@ async function tabRules(main, draft, openId) {
       check(d, 'limit_by_name', 'Same name', '"Juan Dela Cruz" = "juan delacruz". Two people can share a name.'),
       check(d, 'desktop_only', 'Desktop and laptop computers only',
         'Phones and tablets see "Voting unavailable on this device" (worded as anti-cheat) and cannot vote. Most people carry only one phone but rarely bring several laptops, so this limits repeat voting. Leave off for a live audience voting on their phones.'),
+      h('h3.group-title', 'Device & network checks (off unless you tick them)'),
+      h('p.small.notice', 'These can block real people: phones of the same model share a fingerprint, and everyone on one Wi-Fi or mobile network can share an address. Tick only the ones you need. Changes apply to the voting page as soon as you save.'),
+      check(d, 'limit_by_fingerprint', 'Same device, even in incognito',
+        'Recognises a phone or PC after clearing data or in a private window. Identical phone models and identical laptops can look like one device.'),
+      check(d, 'limit_by_cross_browser', 'Same computer, different browser',
+        'Blocks switching Chrome → Edge → Firefox on one device on the same network. Identical PCs on one network (a school lab, an office) count as one voter.'),
+      check(d, 'limit_by_ip', 'Same internet connection (IP)',
+        'One vote allowance per internet address. Everyone on one Wi-Fi, and many people on mobile data, share an address. Online voting only, never at a live venue.'),
+      field('Max voters per internet connection', input(d, 'max_voters_per_network', 'number', { min: 0 }),
+        'Caps how many different voters one internet address can have. Same caution as above. 0 = no limit.'),
+      h('h3.group-title', 'Other'),
       check(d, 'block_private', 'Block private / incognito windows',
         'Incognito wipes the browser token, so blocking it removes an easy way to vote again. Detection is a best guess (mainly Chrome) and can occasionally flag a phone that is almost out of storage.')),
 
@@ -803,8 +815,8 @@ async function tabRules(main, draft, openId) {
     details: () => [d.require_name && 'Name', d.ask_email && 'Email', d.ask_phone && 'Mobile', String(d.extra_field_label || '').trim()]
       .filter(Boolean).join(' · ') || 'Nothing asked',
     anticheat: () => {
-      const on = ['block_bots', 'limit_by_contact', 'limit_by_name',
-        'desktop_only', 'block_private'].filter((k) => d[k]).length;
+      const on = ['block_bots', 'limit_by_contact', 'limit_by_name', 'desktop_only', 'block_private',
+        'limit_by_fingerprint', 'limit_by_cross_browser', 'limit_by_ip'].filter((k) => d[k]).length + (Number(d.max_voters_per_network) > 0 ? 1 : 0);
       return `${plural(on, 'check')} on${Number(d.cooldown_seconds) > 0 ? ` · ${d.cooldown_seconds}s between votes` : ''}`;
     },
     display: () => (!d.show_live_results ? 'Standings hidden from voters' : d.show_vote_counts ? 'Live standings with vote counts' : 'Live standings, no counts'),
@@ -849,7 +861,7 @@ async function tabRules(main, draft, openId) {
       return;
     }
     const patch = Object.fromEntries(RULE_KEYS.map((k) => [k, d[k]]));
-    for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds']) {
+    for (const k of ['score_max', 'price_per_vote', 'max_qty_per_vote', 'max_votes_per_voter', 'max_contestants_per_voter', 'cooldown_seconds', 'max_voters_per_network']) {
       patch[k] = Math.max(0, Number(patch[k]) || 0);
     }
     patch.score_max = Math.min(100, Math.max(2, patch.score_max));
@@ -1134,8 +1146,17 @@ async function tabVotes(main) {
   const view = localStorage.getItem('votes_view') || 'voters';
   const voterById = Object.fromEntries(voters.map((v) => [v.id, v]));
   const nameCount = countBy(voters, 'name_norm');
+  // Shared device / network flags, shown only for the checks that are on.
+  const fpCount = countBy(voters, 'fingerprint');
+  const ipCount = countBy(voters, 'ip');
+  const ipNet = (ip) => (ip || '').includes(':') ? ip.split(':').slice(0, 4).join(':') : (ip || '').split('.').slice(0, 3).join('.');
+  const crossKey = (v) => v.cross_id && `${v.cross_id}|${ipNet(v.ip)}`;
+  const crossCount = countBy(voters.map((v) => ({ k: crossKey(v) })), 'k');
 
   const flags = (v) => [
+    ev.limit_by_fingerprint && fpCount[v.fingerprint] > 1 && `${fpCount[v.fingerprint]} voters share this device fingerprint`,
+    ev.limit_by_cross_browser && v.cross_id && crossCount[crossKey(v)] > 1 && `${crossCount[crossKey(v)]} voters look like the same device (different browsers)`,
+    (ev.limit_by_ip || ev.max_voters_per_network > 0) && v.ip && ipCount[v.ip] > 1 && `${ipCount[v.ip]} voters share this IP`,
     v.name_norm && nameCount[v.name_norm] > 1 && `${nameCount[v.name_norm]} voters share this name`,
     v.device_info?.private_mode_guess && 'Probably a private/incognito window',
   ].filter(Boolean);
@@ -1250,7 +1271,7 @@ function deviceMatch(r) {
   const v = r.voters || {};
   if (r.device_token && r.device_token === v.device_token) return ['ok', '✓ Same browser it voted with'];
   if (r.fingerprint && r.fingerprint === v.fingerprint) return ['ok', '✓ Same device it voted with'];
-  return ['warn', '⚠ Different device from the one it voted with. Linked to this voter by the anti-cheat (same computer and network, or same contact).'];
+  return ['warn', '⚠ Different device from the one it voted with. Linked to this voter by your anti-cheat settings (for example same name, email or mobile).'];
 }
 
 function paidFromCell(r) {
